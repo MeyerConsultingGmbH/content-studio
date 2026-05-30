@@ -1,0 +1,582 @@
+'use client'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { supabase, Customer, Post, Comment } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
+
+// ── Styles ─────────────────────────────────────────────────────────────────────
+const s: Record<string, React.CSSProperties> = {
+  shell: { display: 'flex', minHeight: '100vh' },
+  sidebar: { width: 220, flexShrink: 0, background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '20px 0' },
+  logo: { padding: '0 20px 24px', fontSize: 19, fontWeight: 800 },
+  main: { flex: 1, overflowY: 'auto' as const },
+  topbar: { padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky' as const, top: 0, background: 'var(--bg)', zIndex: 50 },
+  body: { padding: '20px 24px 60px' },
+  card: { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18 },
+  input: { width: '100%', background: '#0D1014', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '9px 12px', fontSize: 14, outline: 'none', fontFamily: 'inherit' },
+  label: { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 5, textTransform: 'uppercase' as const, letterSpacing: '.6px' },
+  btnPrimary: { background: 'var(--accent)', color: '#000', border: 'none', borderRadius: 8, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7 },
+  btnGhost: { background: 'transparent', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7 },
+  btnYellow: { background: 'var(--yellow)', color: '#000', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 12, cursor: 'pointer' },
+  btnSm: { padding: '6px 12px', fontSize: 12, borderRadius: 7 },
+  btnXs: { padding: '4px 8px', fontSize: 11, borderRadius: 6 },
+  g2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 },
+  dropZone: { border: '2px dashed var(--border)', borderRadius: 12, padding: '36px 20px', textAlign: 'center' as const, cursor: 'pointer', background: '#09090B' },
+  resultBlock: { background: '#0A0D10', border: '1px solid var(--border)', borderRadius: 9, padding: '12px 80px 12px 12px', fontSize: 13, lineHeight: 1.65, color: '#C8D0D8', position: 'relative' as const, whiteSpace: 'pre-wrap' as const },
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function NavItem({ icon, label, active, badge, onClick }: any) {
+  return (
+    <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', cursor: 'pointer', color: active ? 'var(--accent)' : 'var(--muted)', fontSize: 13, fontWeight: 600, borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`, background: active ? 'var(--accent-dim)' : 'transparent', transition: 'all .15s' }}>
+      <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{icon}</span>
+      {label}
+      {badge ? <span style={{ marginLeft: 'auto', background: 'var(--accent)', color: '#000', fontSize: 10, fontWeight: 700, borderRadius: 20, padding: '1px 7px' }}>{badge}</span> : null}
+    </div>
+  )
+}
+
+function Badge({ status }: { status: string }) {
+  const map: Record<string, [string, string]> = {
+    pending: ['#6B778520', '#6B7785'],
+    review: ['#FF900020', '#FF9000'],
+    kunde: ['#FFD44720', '#FFD447'],
+    approved: ['#3BFFA020', '#3BFFA0'],
+    rejected: ['#FF575720', '#FF5757'],
+  }
+  const labels: Record<string, string> = { pending: '⏳ Entwurf', review: '👁 Prüfung', kunde: '📤 Beim Kunden', approved: '✓ Freigegeben', rejected: '✕ Abgelehnt' }
+  const [bg, color] = map[status] || map.pending
+  return <span style={{ background: bg, color, border: `1px solid ${color}40`, borderRadius: 20, padding: '3px 9px', fontSize: 11, fontWeight: 700 }}>{labels[status] || status}</span>
+}
+
+function CopyBtn({ text }: { text: string }) {
+  const [ok, setOk] = useState(false)
+  return (
+    <button onClick={async () => { await navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1800) }}
+      style={{ position: 'absolute', top: 9, right: 9, padding: '4px 9px', fontSize: 10, borderRadius: 5, background: '#1A1F25', border: '1px solid var(--border)', color: ok ? 'var(--accent)' : 'var(--muted)', cursor: 'pointer' }}>
+      {ok ? '✓' : 'Kopieren'}
+    </button>
+  )
+}
+
+// ── Cropper ────────────────────────────────────────────────────────────────────
+function Cropper({ src, onCrop, onCancel }: { src: string, onCrop: (url: string, b64: string) => void, onCancel: () => void }) {
+  const RATIO = 4 / 5
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [disp, setDisp] = useState({ w: 1, h: 1 })
+  const [nat, setNat] = useState({ w: 1, h: 1 })
+  const [box, setBox] = useState({ x: 0, y: 0, w: 100, h: 125 })
+  const drag = useRef<any>(null)
+
+  useEffect(() => {
+    const img = new Image()
+    img.onload = () => {
+      setNat({ w: img.naturalWidth, h: img.naturalHeight })
+      const maxW = Math.min(img.naturalWidth, wrapRef.current?.offsetWidth || 400, 520)
+      const dh = maxW * img.naturalHeight / img.naturalWidth
+      setDisp({ w: maxW, h: dh })
+      const bw = Math.min(maxW * 0.85, dh * RATIO), bh = bw / RATIO
+      setBox({ x: (maxW - bw) / 2, y: (dh - bh) / 2, w: bw, h: bh })
+    }
+    img.src = src
+  }, [src])
+
+  const getXY = (e: any) => {
+    const t = e.touches ? e.touches[0] : e
+    const r = wrapRef.current!.getBoundingClientRect()
+    return { x: t.clientX - r.left, y: t.clientY - r.top }
+  }
+  const startMove = (e: any) => { e.preventDefault(); const { x, y } = getXY(e); drag.current = { type: 'move', sx: x, sy: y, ...box } }
+  const startResize = (e: any) => { e.preventDefault(); e.stopPropagation(); const { x } = getXY(e); drag.current = { type: 'resize', sx: x, ...box } }
+  const onMove = useCallback((e: any) => {
+    if (!drag.current) return; e.preventDefault()
+    const { x, y } = getXY(e), d = drag.current
+    if (d.type === 'move') setBox(b => ({ ...b, x: Math.max(0, Math.min(disp.w - d.w, d.x + (x - d.sx))), y: Math.max(0, Math.min(disp.h - d.h, d.y + (y - d.sy))) }))
+    else { const nw = Math.max(50, Math.min(d.w + (x - d.sx), disp.w - d.x, disp.h * RATIO)), nh = nw / RATIO; if (d.y + nh <= disp.h) setBox(b => ({ ...b, w: nw, h: nh })) }
+  }, [disp])
+
+  const apply = () => {
+    const canvas = document.createElement('canvas'); canvas.width = 1080; canvas.height = 1350
+    const ctx = canvas.getContext('2d')!; const img = new Image()
+    img.onload = () => {
+      ctx.drawImage(img, box.x * nat.w / disp.w, box.y * nat.h / disp.h, box.w * nat.w / disp.w, box.h * nat.h / disp.h, 0, 0, 1080, 1350)
+      const url = canvas.toDataURL('image/jpeg', 0.92)
+      onCrop(url, url.split(',')[1])
+    }; img.src = src
+  }
+
+  return (
+    <div ref={wrapRef}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div><div style={{ fontWeight: 700 }}>Zuschneiden <span style={{ color: 'var(--accent)' }}>4:5</span></div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Box ziehen · Ecke skalieren</div></div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onCancel} style={{ ...s.btnGhost, ...s.btnSm }}>Abbrechen</button>
+          <button onClick={apply} style={{ ...s.btnPrimary, ...s.btnSm }}>✓ Übernehmen</button>
+        </div>
+      </div>
+      <div ref={null} style={{ position: 'relative', width: disp.w, maxWidth: '100%', height: disp.h, background: '#000', borderRadius: 10, overflow: 'hidden', userSelect: 'none' }}
+        onMouseMove={onMove} onMouseUp={() => drag.current = null} onMouseLeave={() => drag.current = null}
+        onTouchMove={onMove} onTouchEnd={() => drag.current = null}>
+        <img src={src} style={{ width: '100%', height: disp.h, objectFit: 'fill', display: 'block', pointerEvents: 'none' }} alt="" />
+        {[{ left: 0, top: 0, width: box.x, height: disp.h }, { left: box.x + box.w, top: 0, width: disp.w - box.x - box.w, height: disp.h }, { left: box.x, top: 0, width: box.w, height: box.y }, { left: box.x, top: box.y + box.h, width: box.w, height: disp.h - box.y - box.h }].map((st, i) => (
+          <div key={i} style={{ position: 'absolute', background: 'rgba(0,0,0,.55)', pointerEvents: 'none', ...st }} />
+        ))}
+        <div style={{ position: 'absolute', left: box.x, top: box.y, width: box.w, height: box.h, border: '2px solid var(--accent)', cursor: 'move' }}
+          onMouseDown={startMove} onTouchStart={startMove}>
+          <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 11, color: 'rgba(255,255,255,.3)', pointerEvents: 'none' }}>4:5</span>
+          <div style={{ position: 'absolute', width: 14, height: 14, background: 'var(--accent)', borderRadius: 3, right: -7, bottom: -7, cursor: 'se-resize' }}
+            onMouseDown={startResize} onTouchStart={startResize} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── PostCard ───────────────────────────────────────────────────────────────────
+function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post, onUpdate: (patch: Partial<Post>) => void, onDelete: () => void, onRefreshComments?: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [igE, setIgE] = useState(post.ig_edit || post.ig_text)
+  const [fbE, setFbE] = useState(post.fb_edit || post.fb_text)
+  const [comments, setComments] = useState<Comment[]>([])
+  const [showComments, setShowComments] = useState(false)
+  const [newComment, setNewComment] = useState('')
+  const [loadingComments, setLoadingComments] = useState(false)
+
+  const loadComments = async () => {
+    setLoadingComments(true)
+    const { data } = await supabase.from('comments').select('*').eq('post_id', post.id).order('created_at', { ascending: true })
+    setComments(data || [])
+    setLoadingComments(false)
+  }
+
+  const toggleComments = () => {
+    if (!showComments) loadComments()
+    setShowComments(v => !v)
+  }
+
+  const addComment = async () => {
+    if (!newComment.trim()) return
+    await supabase.from('comments').insert({ post_id: post.id, author: 'admin', text: newComment.trim() })
+    setNewComment('')
+    loadComments()
+  }
+
+  const statusButtons = [
+    { s: 'approved', label: '✓ Freigeben', bg: '#3BFFA020', color: '#3BFFA0', border: '#3BFFA040' },
+    { s: 'kunde', label: '📤 Zum Kunden', bg: '#FFD44720', color: '#FFD447', border: '#FFD44740' },
+    { s: 'review', label: '👁 Prüfung', bg: '#FF900015', color: '#FF9000', border: '#FF900040' },
+    { s: 'rejected', label: '✕ Ablehnen', bg: '#FF575715', color: '#FF5757', border: '#FF575730' },
+  ].filter(b => b.s !== post.status)
+
+  return (
+    <div style={{ ...s.card, padding: 0, overflow: 'hidden', marginBottom: 14 }}>
+      <div style={{ display: 'flex' }}>
+        <div style={{ width: 80, flexShrink: 0 }}>
+          {post.image_url
+            ? <img src={post.image_url} style={{ width: 80, height: 100, objectFit: 'cover', display: 'block' }} alt="" />
+            : <div style={{ width: 80, height: 100, background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: 'var(--border)' }}>📷</div>}
+        </div>
+        <div style={{ flex: 1, padding: '12px 14px', minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{post.customer_name}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{new Date(post.created_at).toLocaleDateString('de', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+          <Badge status={post.status} />
+          <div style={{ marginTop: 6, fontSize: 12, color: '#9AABB8', lineHeight: 1.4, display: expanded ? undefined : '-webkit-box', WebkitLineClamp: expanded ? undefined : 2 as any, WebkitBoxOrient: expanded ? undefined : 'vertical' as any, overflow: expanded ? undefined : 'hidden' }}>
+            {post.ig_edit || post.ig_text}
+          </div>
+          <button onClick={() => setExpanded(e => !e)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, marginTop: 4, padding: 0 }}>
+            {expanded ? '↑ Weniger' : '↓ Mehr'}
+          </button>
+        </div>
+      </div>
+
+      {/* Action bar */}
+      <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+        {statusButtons.map(b => (
+          <button key={b.s} onClick={() => onUpdate({ status: b.s as any })}
+            style={{ background: b.bg, color: b.color, border: `1px solid ${b.border}`, borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+            {b.label}
+          </button>
+        ))}
+        <button onClick={toggleComments} style={{ background: showComments ? '#3BFFA020' : 'transparent', color: showComments ? 'var(--accent)' : 'var(--muted)', border: `1px solid ${showComments ? 'var(--accent-border)' : 'var(--border)'}`, borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+          💬 Kommentare {comments.length > 0 ? `(${comments.length})` : ''}
+        </button>
+        <button onClick={() => setEditing(e => !e)} style={{ ...s.btnGhost, ...s.btnXs, marginLeft: 'auto' }}>{editing ? 'Schließen' : '✏️'}</button>
+        <button onClick={onDelete} style={{ background: '#FF575715', color: '#FF5757', border: '1px solid #FF575730', borderRadius: 6, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}>🗑</button>
+      </div>
+
+      {/* Comments */}
+      {showComments && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
+          {loadingComments && <div style={{ color: 'var(--muted)', fontSize: 13 }}>Lade...</div>}
+          {comments.map(c => (
+            <div key={c.id} style={{ marginBottom: 10, padding: 10, background: c.author === 'admin' ? '#1A2A1A' : '#1A1A2A', borderRadius: 8, borderLeft: `3px solid ${c.author === 'admin' ? 'var(--accent)' : '#A78BFA'}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: c.author === 'admin' ? 'var(--accent)' : '#A78BFA', marginBottom: 3 }}>
+                {c.author === 'admin' ? '👤 Du' : `👥 ${c.author}`}
+                <span style={{ color: 'var(--muted)', fontWeight: 400, marginLeft: 8 }}>{new Date(c.created_at).toLocaleDateString('de')}</span>
+              </div>
+              <div style={{ fontSize: 13, color: '#D0D8E0' }}>{c.text}</div>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <input value={newComment} onChange={e => setNewComment(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addComment()}
+              placeholder="Kommentar hinzufügen..." style={{ ...s.input, flex: 1, fontSize: 13 }} />
+            <button onClick={addComment} style={{ ...s.btnPrimary, ...s.btnSm, flexShrink: 0 }}>Senden</button>
+          </div>
+        </div>
+      )}
+
+      {/* Edit panel */}
+      {editing && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
+          <div style={{ marginBottom: 10 }}>
+            <label style={s.label}>📸 Instagram</label>
+            <textarea value={igE} onChange={e => setIgE(e.target.value)} rows={4}
+              style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={s.label}>📘 Facebook</label>
+            <textarea value={fbE} onChange={e => setFbE(e.target.value)} rows={4}
+              style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => { onUpdate({ ig_edit: igE, fb_edit: fbE }); setEditing(false) }} style={{ ...s.btnPrimary, ...s.btnSm }}>Speichern</button>
+            <button onClick={() => setEditing(false)} style={{ ...s.btnGhost, ...s.btnSm }}>Abbrechen</button>
+            <button onClick={() => navigator.clipboard.writeText(`INSTAGRAM:\n${igE}\n\nFACEBOOK:\n${fbE}\n\nHASHTAGS:\n${post.hashtags?.map(t => '#' + t.replace(/^#/, '')).join(' ')}`)}
+              style={{ flex: 1, padding: '7px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+              📋 Alles kopieren
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main Admin App ─────────────────────────────────────────────────────────────
+export default function AdminPage() {
+  const router = useRouter()
+  const [nav, setNav] = useState('generate')
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [posts, setPosts] = useState<Post[]>([])
+  const [selCust, setSelCust] = useState<Customer | null>(null)
+  const [rawImg, setRawImg] = useState<string | null>(null)
+  const [croppedImg, setCroppedImg] = useState<string | null>(null)
+  const [croppedB64, setCroppedB64] = useState<string | null>(null)
+  const [showCrop, setShowCrop] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [result, setResult] = useState<any>(null)
+  const [errMsg, setErrMsg] = useState('')
+  const [dragover, setDragover] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // Customer form
+  const blankC = { name: '', instagram: '', facebook: '', industry: '', tone: '', description: '', refs: [], lang: 'de', slug: '' }
+  const [cForm, setCForm] = useState<any>(blankC)
+  const [editCId, setEditCId] = useState<string | null>(null)
+
+  // Board filters
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [custFilter, setCustFilter] = useState<string | null>(null)
+
+  // Auth check
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !localStorage.getItem('cs_admin')) {
+      router.push('/')
+    }
+  }, [])
+
+  // Load data
+  useEffect(() => {
+    loadAll()
+  }, [])
+
+  const loadAll = async () => {
+    setLoading(true)
+    const [{ data: custs }, { data: ps }] = await Promise.all([
+      supabase.from('customers').select('*').order('created_at', { ascending: true }),
+      supabase.from('posts').select('*').order('created_at', { ascending: false })
+    ])
+    setCustomers(custs || [])
+    setPosts(ps || [])
+    setLoading(false)
+  }
+
+  const handleFile = useCallback((file: File) => {
+    if (!file || !file.type.startsWith('image/')) return
+    const r = new FileReader()
+    r.onload = ev => { setRawImg(ev.target?.result as string); setCroppedImg(null); setCroppedB64(null); setResult(null); setErrMsg(''); setShowCrop(true) }
+    r.readAsDataURL(file)
+  }, [])
+
+  const generate = async () => {
+    if (!selCust || !croppedB64) return
+    setGenerating(true); setResult(null); setErrMsg('')
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: croppedB64, customer: selCust })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Fehler')
+      setResult(data)
+    } catch (e: any) {
+      setErrMsg(e.message)
+    }
+    setGenerating(false)
+  }
+
+  const savePost = async (toKunde = false) => {
+    if (!result || !selCust) return
+    const { data } = await supabase.from('posts').insert({
+      customer_id: selCust.id, customer_name: selCust.name,
+      image_url: croppedImg, ig_text: result.ig, fb_text: result.fb,
+      ig_edit: result.ig, fb_edit: result.fb, hashtags: result.tags,
+      status: toKunde ? 'kunde' : 'pending'
+    }).select().single()
+    if (data) setPosts(p => [data, ...p])
+    setResult(null); setCroppedImg(null); setCroppedB64(null); setRawImg(null)
+    setNav(toKunde ? 'abnahme' : 'board')
+  }
+
+  const updatePost = async (id: string, patch: Partial<Post>) => {
+    await supabase.from('posts').update(patch).eq('id', id)
+    setPosts(ps => ps.map(p => p.id === id ? { ...p, ...patch } : p))
+  }
+
+  const deletePost = async (id: string) => {
+    await supabase.from('posts').delete().eq('id', id)
+    setPosts(ps => ps.filter(p => p.id !== id))
+  }
+
+  const saveCust = async () => {
+    if (!cForm.name.trim()) return
+    const slug = cForm.slug || cForm.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    if (editCId) {
+      await supabase.from('customers').update({ ...cForm, slug }).eq('id', editCId)
+      setCustomers(cs => cs.map(c => c.id === editCId ? { ...c, ...cForm, slug } : c))
+    } else {
+      const { data } = await supabase.from('customers').insert({ ...cForm, slug }).select().single()
+      if (data) setCustomers(cs => [...cs, data])
+    }
+    setEditCId(null); setCForm(blankC)
+  }
+
+  const pendingCount = posts.filter(p => p.status === 'pending' || p.status === 'review').length
+  const kundeCount = posts.filter(p => p.status === 'kunde').length
+  const navItems = [
+    { id: 'generate', icon: '✦', label: 'Erstellen' },
+    { id: 'board', icon: '☰', label: 'Board', badge: pendingCount || null },
+    { id: 'abnahme', icon: '📤', label: 'Abnahme', badge: kundeCount || null },
+    { id: 'log', icon: '◷', label: 'Log' },
+    { id: 'customers', icon: '◈', label: 'Kunden' },
+  ]
+
+  const filteredPosts = posts.filter(p => (statusFilter === 'all' || p.status === statusFilter) && (!custFilter || p.customer_id === custFilter))
+
+  return (
+    <div style={s.shell}>
+      {/* Sidebar */}
+      <div style={s.sidebar}>
+        <div style={s.logo}>content<span style={{ color: 'var(--accent)' }}>.</span>studio</div>
+        {navItems.map(n => <NavItem key={n.id} icon={n.icon} label={n.label} active={nav === n.id} badge={n.badge} onClick={() => setNav(n.id)} />)}
+        <div style={{ marginTop: 'auto', padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, textAlign: 'center', borderRadius: 8, fontSize: 11, padding: '7px 12px' }}>👁 Kundenansicht: {selCust.name}</a>}
+          <button onClick={() => { localStorage.removeItem('cs_admin'); router.push('/') }} style={{ ...s.btnGhost, ...s.btnSm, width: '100%', justifyContent: 'center' }}>Ausloggen</button>
+        </div>
+      </div>
+
+      <div style={s.main}>
+
+        {/* GENERATE */}
+        {nav === 'generate' && <>
+          <div style={s.topbar}><div><div style={{ fontSize: 18, fontWeight: 800 }}>Beitrag erstellen</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Bild · Zuschnitt · KI-Text · Zum Kunden</div></div></div>
+          <div style={s.body}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 6 }}>① Kunde wählen</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10, marginBottom: 20 }}>
+              {customers.map(c => (
+                <div key={c.id} onClick={() => { setSelCust(c); setResult(null) }}
+                  style={{ background: selCust?.id === c.id ? 'var(--accent-dim)' : 'var(--card)', border: `2px solid ${selCust?.id === c.id ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 10, padding: 12, cursor: 'pointer' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: 'var(--accent)', marginBottom: 7 }}>{c.name[0]}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{c.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.instagram || c.industry}</div>
+                </div>
+              ))}
+              {customers.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>Zuerst Kunden anlegen →</div>}
+            </div>
+
+            {selCust && <div style={s.g2}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 6 }}>② Bild hochladen &amp; zuschneiden</div>
+                {!showCrop && !croppedImg && (
+                  <div style={s.dropZone} onClick={() => fileRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); setDragover(true) }}
+                    onDragLeave={() => setDragover(false)}
+                    onDrop={e => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]) }}>
+                    <div style={{ fontSize: 36, marginBottom: 10 }}>📷</div>
+                    <div style={{ fontWeight: 700, marginBottom: 3 }}>Bild ablegen</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>JPG · PNG · WEBP</div>
+                  </div>
+                )}
+                {showCrop && rawImg && (
+                  <div style={{ ...s.card, padding: 14 }}>
+                    <Cropper src={rawImg} onCrop={(url, b64) => { setCroppedImg(url); setCroppedB64(b64); setShowCrop(false) }} onCancel={() => { setShowCrop(false); setRawImg(null) }} />
+                  </div>
+                )}
+                {croppedImg && !showCrop && (
+                  <div>
+                    <img src={croppedImg} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} alt="" />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                      <button onClick={generate} disabled={generating} style={{ ...s.btnPrimary, flex: 1 }}>{generating ? '⏳ Generiere...' : '✦ Beitrag generieren'}</button>
+                      <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg('') }} style={s.btnGhost}>✕</button>
+                    </div>
+                  </div>
+                )}
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files![0])} />
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 6 }}>③ Generierter Beitrag</div>
+                {errMsg && <div style={{ background: '#FF575710', border: '1px solid #FF575740', borderRadius: 10, padding: '12px 16px', marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--danger)', marginBottom: 4 }}>⚠️ Fehler</div>
+                  <div style={{ fontSize: 12, color: 'var(--danger)' }}>{errMsg}</div>
+                  <button onClick={generate} style={{ ...s.btnPrimary, ...s.btnSm, marginTop: 10 }}>Nochmal</button>
+                </div>}
+                {result && <div style={s.card}>
+                  <div style={{ fontWeight: 700, marginBottom: 14 }}>Beitrag · <span style={{ color: 'var(--accent)' }}>{selCust.name}</span></div>
+                  <div style={{ ...s.label, marginBottom: 5 }}>📸 Instagram</div>
+                  <div style={s.resultBlock}>{result.ig}<CopyBtn text={result.ig} /></div>
+                  <div style={{ ...s.label, marginTop: 12, marginBottom: 5 }}>📘 Facebook</div>
+                  <div style={s.resultBlock}>{result.fb}<CopyBtn text={result.fb} /></div>
+                  <div style={{ ...s.label, marginTop: 12, marginBottom: 7 }}># Hashtags</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{result.tags?.map((t: string, i: number) => <span key={i} style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>#{t.replace(/^#/, '')}</span>)}</div>
+                  <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <button onClick={() => savePost(true)} style={{ ...s.btnYellow, width: '100%', justifyContent: 'center', padding: 11, fontSize: 13 }}>📤 Direkt zum Kunden senden</button>
+                    <button onClick={() => savePost(false)} style={{ ...s.btnGhost, width: '100%', justifyContent: 'center' }}>◷ Im Board speichern</button>
+                  </div>
+                </div>}
+                {!generating && !result && !errMsg && <div style={{ ...s.card, border: '1px dashed var(--border)' }}><div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--border)', fontSize: 13 }}>Beitrag erscheint hier</div></div>}
+              </div>
+            </div>}
+          </div>
+        </>}
+
+        {/* BOARD */}
+        {nav === 'board' && <>
+          <div style={s.topbar}><div style={{ fontSize: 18, fontWeight: 800 }}>Freigabe-Board</div></div>
+          <div style={s.body}>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 12, overflowX: 'auto' }}>
+              {[null, ...customers].map((c: any) => <button key={c?.id || 'all'} onClick={() => setCustFilter(c?.id || null)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: custFilter === (c?.id || null) ? 'var(--accent)' : 'transparent', color: custFilter === (c?.id || null) ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>{c?.name || 'Alle'}</button>)}
+            </div>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
+              {['all', 'pending', 'review', 'kunde', 'approved', 'rejected'].map(st => {
+                const labels: Record<string, string> = { all: 'Alle', pending: '⏳ Entwurf', review: '👁 Prüfung', kunde: '📤 Beim Kunden', approved: '✓ Freigegeben', rejected: '✕ Abgelehnt' }
+                return <button key={st} onClick={() => setStatusFilter(st)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: statusFilter === st ? 'var(--accent)' : 'transparent', color: statusFilter === st ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>{labels[st]}</button>
+              })}
+            </div>
+            {filteredPosts.length === 0 && <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Keine Beiträge</div>}
+            {filteredPosts.map(p => <PostCard key={p.id} post={p} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)}
+          </div>
+        </>}
+
+        {/* ABNAHME */}
+        {nav === 'abnahme' && <>
+          <div style={s.topbar}>
+            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Beiträge die beim Kunden liegen</div></div>
+            {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, borderRadius: 8, padding: '8px 14px', fontSize: 12 }}>👁 Kundenansicht öffnen</a>}
+          </div>
+          <div style={s.body}>
+            <div style={{ ...s.card, borderColor: '#FFD44740', background: '#FFD44708', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ fontSize: 20 }}>💡</div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>Kundenlink teilen</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+                    Jeder Kunde hat eine eigene URL: <code style={{ background: '#1A1A2A', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>deine-domain.vercel.app/kunde/[slug]</code><br />
+                    Im Board auf <strong style={{ color: 'var(--yellow)' }}>„📤 Zum Kunden"</strong> klicken → Link teilen → Kunde gibt frei.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
+              {customers.map(c => <button key={c.id} onClick={() => setSelCust(c)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: selCust?.id === c.id ? 'var(--accent)' : 'transparent', color: selCust?.id === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{c.name}</button>)}
+            </div>
+            {posts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => (
+              <PostCard key={p.id} post={p} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />
+            ))}
+          </div>
+        </>}
+
+        {/* LOG */}
+        {nav === 'log' && <>
+          <div style={s.topbar}><div style={{ fontSize: 18, fontWeight: 800 }}>Verlaufs-Log</div><span style={{ color: 'var(--muted)', fontSize: 13 }}>{posts.length} Beiträge</span></div>
+          <div style={s.body}>
+            <div style={{ ...s.card, padding: 0, overflow: 'hidden' }}>
+              {posts.map((p, i) => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: i < posts.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  {p.image_url ? <img src={p.image_url} style={{ width: 36, height: 45, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} alt="" /> : <div style={{ width: 36, height: 45, borderRadius: 6, background: 'var(--surface)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📷</div>}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{p.customer_name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(p.ig_edit || p.ig_text)?.substring(0, 60)}…</div>
+                  </div>
+                  <Badge status={p.status} />
+                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'DM Mono', flexShrink: 0, marginLeft: 8 }}>{new Date(p.created_at).toLocaleDateString('de')}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>}
+
+        {/* CUSTOMERS */}
+        {nav === 'customers' && <>
+          <div style={s.topbar}><div style={{ fontSize: 18, fontWeight: 800 }}>Kunden</div></div>
+          <div style={s.body}>
+            <div style={s.g2}>
+              <div style={s.card}>
+                <div style={{ fontWeight: 700, marginBottom: 14 }}>{editCId ? '✏️ Bearbeiten' : '＋ Neuer Kunde'}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {[['name', 'Kundenname *', 'Restaurant Bella Italia'], ['instagram', 'Instagram', '@handle'], ['facebook', 'Facebook', 'seitenname'], ['industry', 'Branche', 'Gastronomie, Fitness…'], ['tone', 'Tonalität', 'locker, professionell…'], ['slug', 'URL-Slug (für Kundenlink)', 'bella-italia']].map(([field, lbl, ph]) => (
+                    <div key={field}><label style={s.label}>{lbl}</label><input value={cForm[field]} onChange={e => setCForm((f: any) => ({ ...f, [field]: e.target.value }))} placeholder={ph as string} style={s.input} /></div>
+                  ))}
+                  <div><label style={s.label}>Beschreibung</label><textarea value={cForm.description} onChange={e => setCForm((f: any) => ({ ...f, description: e.target.value }))} style={{ ...s.input, resize: 'vertical', minHeight: 72 }} /></div>
+                  <div><label style={s.label}>Sprache</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {[['de', '🇩🇪 Deutsch'], ['en', '🇬🇧 English']].map(([l, lb]) => <button key={l} onClick={() => setCForm((f: any) => ({ ...f, lang: l }))} style={{ ...cForm.lang === l ? s.btnPrimary : s.btnGhost, ...s.btnSm }}>{lb}</button>)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={saveCust} disabled={!cForm.name.trim()} style={{ ...s.btnPrimary, flex: 1 }}>{editCId ? 'Speichern' : 'Anlegen'}</button>
+                    {editCId && <button onClick={() => { setEditCId(null); setCForm(blankC) }} style={s.btnGhost}>Abbrechen</button>}
+                  </div>
+                </div>
+              </div>
+              <div>
+                {customers.map(c => (
+                  <div key={c.id} style={{ ...s.card, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, marginBottom: 3 }}>{c.name}</div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 3 }}>{c.instagram && <span style={{ marginRight: 8 }}>📸 {c.instagram}</span>}{c.facebook && <span>📘 {c.facebook}</span>}</div>
+                        {c.industry && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.industry}</div>}
+                        <div style={{ fontSize: 11, color: 'var(--border)', marginTop: 4 }}>🔗 /kunde/{c.slug}</div>
+                        <a href={`/kunde/${c.slug}`} target="_blank" style={{ fontSize: 11, color: 'var(--accent)', marginTop: 3, display: 'block' }}>Kundenlink öffnen →</a>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => { setCForm({ ...c }); setEditCId(c.id) }} style={{ ...s.btnGhost, ...s.btnXs }}>✏️</button>
+                        <button onClick={async () => { await supabase.from('customers').delete().eq('id', c.id); setCustomers(cs => cs.filter(x => x.id !== c.id)) }} style={{ background: '#FF575715', color: '#FF5757', border: '1px solid #FF575730', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>🗑</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>}
+
+      </div>
+    </div>
+  )
+}
