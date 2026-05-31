@@ -3,11 +3,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase, Customer, Post, Comment } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-// ── Styles ─────────────────────────────────────────────────────────────────────
 const s: Record<string, React.CSSProperties> = {
   shell: { display: 'flex', minHeight: '100vh' },
   sidebar: { width: 220, flexShrink: 0, background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '20px 0' },
-  logo: { padding: '0 20px 24px', fontSize: 19, fontWeight: 800 },
   main: { flex: 1, overflowY: 'auto' as const },
   topbar: { padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky' as const, top: 0, background: 'var(--bg)', zIndex: 50 },
   body: { padding: '20px 24px 60px' },
@@ -24,7 +22,6 @@ const s: Record<string, React.CSSProperties> = {
   resultBlock: { background: '#0A0D10', border: '1px solid var(--border)', borderRadius: 9, padding: '12px 80px 12px 12px', fontSize: 13, lineHeight: 1.65, color: '#C8D0D8', position: 'relative' as const, whiteSpace: 'pre-wrap' as const },
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
 function NavItem({ icon, label, active, badge, onClick }: any) {
   return (
     <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', cursor: 'pointer', color: active ? 'var(--accent)' : 'var(--muted)', fontSize: 13, fontWeight: 600, borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`, background: active ? 'var(--accent-dim)' : 'transparent', transition: 'all .15s' }}>
@@ -113,7 +110,7 @@ function Cropper({ src, onCrop, onCancel }: { src: string, onCrop: (url: string,
           <button onClick={apply} style={{ ...s.btnPrimary, ...s.btnSm }}>✓ Übernehmen</button>
         </div>
       </div>
-      <div ref={null} style={{ position: 'relative', width: disp.w, maxWidth: '100%', height: disp.h, background: '#000', borderRadius: 10, overflow: 'hidden', userSelect: 'none' }}
+      <div style={{ position: 'relative', width: disp.w, maxWidth: '100%', height: disp.h, background: '#000', borderRadius: 10, overflow: 'hidden', userSelect: 'none' }}
         onMouseMove={onMove} onMouseUp={() => drag.current = null} onMouseLeave={() => drag.current = null}
         onTouchMove={onMove} onTouchEnd={() => drag.current = null}>
         <img src={src} style={{ width: '100%', height: disp.h, objectFit: 'fill', display: 'block', pointerEvents: 'none' }} alt="" />
@@ -131,8 +128,8 @@ function Cropper({ src, onCrop, onCancel }: { src: string, onCrop: (url: string,
   )
 }
 
-// ── PostCard ───────────────────────────────────────────────────────────────────
-function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post, onUpdate: (patch: Partial<Post>) => void, onDelete: () => void, onRefreshComments?: () => void }) {
+// ── PostCard (with image replace + regenerate) ─────────────────────────────────
+function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, customers: Customer[], onUpdate: (patch: Partial<Post>) => void, onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const [igE, setIgE] = useState(post.ig_edit || post.ig_text)
@@ -142,6 +139,16 @@ function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post,
   const [newComment, setNewComment] = useState('')
   const [loadingComments, setLoadingComments] = useState(false)
 
+  // ── Image replace state ──
+  const [showImageReplace, setShowImageReplace] = useState(false)
+  const [newRawImg, setNewRawImg] = useState<string | null>(null)
+  const [showCropReplace, setShowCropReplace] = useState(false)
+  const imgReplaceRef = useRef<HTMLInputElement>(null)
+
+  // ── Regenerate state ──
+  const [regenerating, setRegenerating] = useState(false)
+  const [regenErr, setRegenErr] = useState('')
+
   const loadComments = async () => {
     setLoadingComments(true)
     const { data } = await supabase.from('comments').select('*').eq('post_id', post.id).order('created_at', { ascending: true })
@@ -149,16 +156,61 @@ function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post,
     setLoadingComments(false)
   }
 
-  const toggleComments = () => {
-    if (!showComments) loadComments()
-    setShowComments(v => !v)
-  }
+  const toggleComments = () => { if (!showComments) loadComments(); setShowComments(v => !v) }
 
   const addComment = async () => {
     if (!newComment.trim()) return
     await supabase.from('comments').insert({ post_id: post.id, author: 'admin', text: newComment.trim() })
-    setNewComment('')
-    loadComments()
+    setNewComment(''); loadComments()
+  }
+
+  // ── Handle image replace ──
+  const handleReplaceFile = (file: File) => {
+    if (!file || !file.type.startsWith('image/')) return
+    const r = new FileReader()
+    r.onload = ev => { setNewRawImg(ev.target?.result as string); setShowCropReplace(true) }
+    r.readAsDataURL(file)
+  }
+
+  const onReplaceCropped = async (url: string) => {
+    await onUpdate({ image_url: url })
+    setShowImageReplace(false); setNewRawImg(null); setShowCropReplace(false)
+  }
+
+  // ── Regenerate text with same image ──
+  const regenerate = async () => {
+    setRegenerating(true); setRegenErr('')
+    const cust = customers.find(c => c.id === post.customer_id)
+    if (!cust) { setRegenErr('Kunde nicht gefunden'); setRegenerating(false); return }
+
+    // Need base64 from current image
+    let imageB64 = ''
+    try {
+      const res = await fetch(post.image_url)
+      const blob = await res.blob()
+      imageB64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.readAsDataURL(blob)
+      })
+    } catch {
+      setRegenErr('Bild konnte nicht geladen werden'); setRegenerating(false); return
+    }
+
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: imageB64, customer: cust })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Fehler')
+      await onUpdate({ ig_text: data.ig, fb_text: data.fb, ig_edit: data.ig, fb_edit: data.fb, hashtags: data.tags })
+      setIgE(data.ig); setFbE(data.fb)
+    } catch (e: any) {
+      setRegenErr(e.message)
+    }
+    setRegenerating(false)
   }
 
   const statusButtons = [
@@ -171,10 +223,17 @@ function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post,
   return (
     <div style={{ ...s.card, padding: 0, overflow: 'hidden', marginBottom: 14 }}>
       <div style={{ display: 'flex' }}>
-        <div style={{ width: 80, flexShrink: 0 }}>
+        <div style={{ width: 80, flexShrink: 0, position: 'relative' }}>
           {post.image_url
             ? <img src={post.image_url} style={{ width: 80, height: 100, objectFit: 'cover', display: 'block' }} alt="" />
             : <div style={{ width: 80, height: 100, background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: 'var(--border)' }}>📷</div>}
+          {/* Image replace button overlay */}
+          <button
+            onClick={() => { setShowImageReplace(v => !v); setShowCropReplace(false); setNewRawImg(null) }}
+            title="Bild ersetzen"
+            style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,.75)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 5, color: '#fff', fontSize: 12, padding: '3px 5px', cursor: 'pointer' }}>
+            🔄
+          </button>
         </div>
         <div style={{ flex: 1, padding: '12px 14px', minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{post.customer_name}</div>
@@ -189,6 +248,34 @@ function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post,
         </div>
       </div>
 
+      {/* Image replace panel */}
+      {showImageReplace && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
+          {!showCropReplace && (
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--accent)' }}>🔄 Bild ersetzen</div>
+              <div
+                style={{ ...s.dropZone, padding: '20px' }}
+                onClick={() => imgReplaceRef.current?.click()}>
+                <div style={{ fontSize: 24, marginBottom: 6 }}>📷</div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Neues Bild auswählen</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>JPG · PNG · WEBP</div>
+              </div>
+              <input ref={imgReplaceRef} type="file" accept="image/*" style={{ display: 'none' }}
+                onChange={e => handleReplaceFile(e.target.files![0])} />
+              <button onClick={() => setShowImageReplace(false)} style={{ ...s.btnGhost, ...s.btnSm, marginTop: 8 }}>Abbrechen</button>
+            </div>
+          )}
+          {showCropReplace && newRawImg && (
+            <Cropper
+              src={newRawImg}
+              onCrop={(url) => onReplaceCropped(url)}
+              onCancel={() => { setShowCropReplace(false); setNewRawImg(null) }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Action bar */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
         {statusButtons.map(b => (
@@ -197,12 +284,22 @@ function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post,
             {b.label}
           </button>
         ))}
+        {/* Regenerate button */}
+        <button
+          onClick={regenerate}
+          disabled={regenerating}
+          style={{ background: '#A78BFA20', color: '#A78BFA', border: '1px solid #A78BFA40', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: regenerating ? 'not-allowed' : 'pointer', opacity: regenerating ? 0.6 : 1 }}>
+          {regenerating ? '⏳ Neu...' : '✨ Text neu'}
+        </button>
         <button onClick={toggleComments} style={{ background: showComments ? '#3BFFA020' : 'transparent', color: showComments ? 'var(--accent)' : 'var(--muted)', border: `1px solid ${showComments ? 'var(--accent-border)' : 'var(--border)'}`, borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-          💬 Kommentare {comments.length > 0 ? `(${comments.length})` : ''}
+          💬 {comments.length > 0 ? `(${comments.length})` : 'Kommentare'}
         </button>
         <button onClick={() => setEditing(e => !e)} style={{ ...s.btnGhost, ...s.btnXs, marginLeft: 'auto' }}>{editing ? 'Schließen' : '✏️'}</button>
         <button onClick={onDelete} style={{ background: '#FF575715', color: '#FF5757', border: '1px solid #FF575730', borderRadius: 6, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}>🗑</button>
       </div>
+
+      {/* Regen error */}
+      {regenErr && <div style={{ padding: '8px 14px', background: '#FF575710', color: '#FF5757', fontSize: 12 }}>⚠️ {regenErr}</div>}
 
       {/* Comments */}
       {showComments && (
@@ -220,7 +317,7 @@ function PostCard({ post, onUpdate, onDelete, onRefreshComments }: { post: Post,
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <input value={newComment} onChange={e => setNewComment(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addComment()}
-              placeholder="Kommentar hinzufügen..." style={{ ...s.input, flex: 1, fontSize: 13 }} />
+              placeholder="Kommentar..." style={{ ...s.input, flex: 1, fontSize: 13 }} />
             <button onClick={addComment} style={{ ...s.btnPrimary, ...s.btnSm, flexShrink: 0 }}>Senden</button>
           </div>
         </div>
@@ -268,39 +365,27 @@ export default function AdminPage() {
   const [result, setResult] = useState<any>(null)
   const [errMsg, setErrMsg] = useState('')
   const [dragover, setDragover] = useState(false)
-  const [loading, setLoading] = useState(true)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Customer form
   const blankC = { name: '', instagram: '', facebook: '', industry: '', tone: '', description: '', refs: [], lang: 'de', slug: '' }
   const [cForm, setCForm] = useState<any>(blankC)
   const [editCId, setEditCId] = useState<string | null>(null)
-
-  // Board filters
   const [statusFilter, setStatusFilter] = useState('all')
   const [custFilter, setCustFilter] = useState<string | null>(null)
 
-  // Auth check
   useEffect(() => {
-    if (typeof window !== 'undefined' && !localStorage.getItem('cs_admin')) {
-      router.push('/')
-    }
+    if (typeof window !== 'undefined' && !localStorage.getItem('cs_admin')) router.push('/')
   }, [])
 
-  // Load data
-  useEffect(() => {
-    loadAll()
-  }, [])
+  useEffect(() => { loadAll() }, [])
 
   const loadAll = async () => {
-    setLoading(true)
     const [{ data: custs }, { data: ps }] = await Promise.all([
       supabase.from('customers').select('*').order('created_at', { ascending: true }),
       supabase.from('posts').select('*').order('created_at', { ascending: false })
     ])
     setCustomers(custs || [])
     setPosts(ps || [])
-    setLoading(false)
   }
 
   const handleFile = useCallback((file: File) => {
@@ -322,9 +407,24 @@ export default function AdminPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
-    } catch (e: any) {
-      setErrMsg(e.message)
-    }
+    } catch (e: any) { setErrMsg(e.message) }
+    setGenerating(false)
+  }
+
+  // ── Regenerate from generate tab ──
+  const regenerateFromTab = async () => {
+    if (!selCust || !croppedB64) return
+    setGenerating(true); setErrMsg('')
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: croppedB64, customer: selCust })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Fehler')
+      setResult(data)
+    } catch (e: any) { setErrMsg(e.message) }
     setGenerating(false)
   }
 
@@ -378,9 +478,8 @@ export default function AdminPage() {
 
   return (
     <div style={s.shell}>
-      {/* Sidebar */}
       <div style={s.sidebar}>
-        <div style={s.logo}>content<span style={{ color: 'var(--accent)' }}>.</span>studio</div>
+        <div style={{ padding: '0 20px 24px', fontSize: 19, fontWeight: 800 }}>content<span style={{ color: 'var(--accent)' }}>.</span>studio</div>
         {navItems.map(n => <NavItem key={n.id} icon={n.icon} label={n.label} active={nav === n.id} badge={n.badge} onClick={() => setNav(n.id)} />)}
         <div style={{ marginTop: 'auto', padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, textAlign: 'center', borderRadius: 8, fontSize: 11, padding: '7px 12px' }}>👁 Kundenansicht: {selCust.name}</a>}
@@ -394,7 +493,7 @@ export default function AdminPage() {
         {nav === 'generate' && <>
           <div style={s.topbar}><div><div style={{ fontSize: 18, fontWeight: 800 }}>Beitrag erstellen</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Bild · Zuschnitt · KI-Text · Zum Kunden</div></div></div>
           <div style={s.body}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 6 }}>① Kunde wählen</div>
+            <div style={s.label}>① Kunde wählen</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10, marginBottom: 20 }}>
               {customers.map(c => (
                 <div key={c.id} onClick={() => { setSelCust(c); setResult(null) }}
@@ -404,12 +503,11 @@ export default function AdminPage() {
                   <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.instagram || c.industry}</div>
                 </div>
               ))}
-              {customers.length === 0 && <div style={{ color: 'var(--muted)', fontSize: 13 }}>Zuerst Kunden anlegen →</div>}
             </div>
 
             {selCust && <div style={s.g2}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 6 }}>② Bild hochladen &amp; zuschneiden</div>
+                <div style={s.label}>② Bild hochladen &amp; zuschneiden</div>
                 {!showCrop && !croppedImg && (
                   <div style={s.dropZone} onClick={() => fileRef.current?.click()}
                     onDragOver={e => { e.preventDefault(); setDragover(true) }}
@@ -438,7 +536,7 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px', marginBottom: 6 }}>③ Generierter Beitrag</div>
+                <div style={s.label}>③ Generierter Beitrag</div>
                 {errMsg && <div style={{ background: '#FF575710', border: '1px solid #FF575740', borderRadius: 10, padding: '12px 16px', marginBottom: 12 }}>
                   <div style={{ fontWeight: 700, color: 'var(--danger)', marginBottom: 4 }}>⚠️ Fehler</div>
                   <div style={{ fontSize: 12, color: 'var(--danger)' }}>{errMsg}</div>
@@ -446,13 +544,18 @@ export default function AdminPage() {
                 </div>}
                 {result && <div style={s.card}>
                   <div style={{ fontWeight: 700, marginBottom: 14 }}>Beitrag · <span style={{ color: 'var(--accent)' }}>{selCust.name}</span></div>
-                  <div style={{ ...s.label, marginBottom: 5 }}>📸 Instagram</div>
+                  <div style={s.label}>📸 Instagram</div>
                   <div style={s.resultBlock}>{result.ig}<CopyBtn text={result.ig} /></div>
-                  <div style={{ ...s.label, marginTop: 12, marginBottom: 5 }}>📘 Facebook</div>
+                  <div style={{ ...s.label, marginTop: 12 }}>📘 Facebook</div>
                   <div style={s.resultBlock}>{result.fb}<CopyBtn text={result.fb} /></div>
                   <div style={{ ...s.label, marginTop: 12, marginBottom: 7 }}># Hashtags</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{result.tags?.map((t: string, i: number) => <span key={i} style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>#{t.replace(/^#/, '')}</span>)}</div>
                   <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+                  {/* Regenerate button */}
+                  <button onClick={regenerateFromTab} disabled={generating}
+                    style={{ width: '100%', background: '#A78BFA20', color: '#A78BFA', border: '1px solid #A78BFA40', borderRadius: 8, padding: 10, fontWeight: 700, fontSize: 13, cursor: generating ? 'not-allowed' : 'pointer', marginBottom: 8 }}>
+                    {generating ? '⏳ Generiere neu...' : '✨ Anderen Text generieren'}
+                  </button>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <button onClick={() => savePost(true)} style={{ ...s.btnYellow, width: '100%', justifyContent: 'center', padding: 11, fontSize: 13 }}>📤 Direkt zum Kunden senden</button>
                     <button onClick={() => savePost(false)} style={{ ...s.btnGhost, width: '100%', justifyContent: 'center' }}>◷ Im Board speichern</button>
@@ -478,35 +581,24 @@ export default function AdminPage() {
               })}
             </div>
             {filteredPosts.length === 0 && <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Keine Beiträge</div>}
-            {filteredPosts.map(p => <PostCard key={p.id} post={p} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)}
+            {filteredPosts.map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)}
           </div>
         </>}
 
         {/* ABNAHME */}
         {nav === 'abnahme' && <>
           <div style={s.topbar}>
-            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Beiträge die beim Kunden liegen</div></div>
-            {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, borderRadius: 8, padding: '8px 14px', fontSize: 12 }}>👁 Kundenansicht öffnen</a>}
+            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div></div>
+            {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, borderRadius: 8, padding: '8px 14px', fontSize: 12 }}>👁 Kundenansicht</a>}
           </div>
           <div style={s.body}>
-            <div style={{ ...s.card, borderColor: '#FFD44740', background: '#FFD44708', marginBottom: 16 }}>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <div style={{ fontSize: 20 }}>💡</div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>Kundenlink teilen</div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-                    Jeder Kunde hat eine eigene URL: <code style={{ background: '#1A1A2A', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>deine-domain.vercel.app/kunde/[slug]</code><br />
-                    Im Board auf <strong style={{ color: 'var(--yellow)' }}>„📤 Zum Kunden"</strong> klicken → Link teilen → Kunde gibt frei.
-                  </div>
-                </div>
-              </div>
-            </div>
             <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
               {customers.map(c => <button key={c.id} onClick={() => setSelCust(c)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: selCust?.id === c.id ? 'var(--accent)' : 'transparent', color: selCust?.id === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{c.name}</button>)}
             </div>
-            {posts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => (
-              <PostCard key={p.id} post={p} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />
-            ))}
+            {posts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).length === 0
+              ? <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Keine Beiträge beim Kunden</div>
+              : posts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)
+            }
           </div>
         </>}
 
@@ -515,6 +607,7 @@ export default function AdminPage() {
           <div style={s.topbar}><div style={{ fontSize: 18, fontWeight: 800 }}>Verlaufs-Log</div><span style={{ color: 'var(--muted)', fontSize: 13 }}>{posts.length} Beiträge</span></div>
           <div style={s.body}>
             <div style={{ ...s.card, padding: 0, overflow: 'hidden' }}>
+              {posts.length === 0 && <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Noch nichts gespeichert</div>}
               {posts.map((p, i) => (
                 <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: i < posts.length - 1 ? '1px solid var(--border)' : 'none' }}>
                   {p.image_url ? <img src={p.image_url} style={{ width: 36, height: 45, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} alt="" /> : <div style={{ width: 36, height: 45, borderRadius: 6, background: 'var(--surface)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📷</div>}
@@ -523,7 +616,7 @@ export default function AdminPage() {
                     <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(p.ig_edit || p.ig_text)?.substring(0, 60)}…</div>
                   </div>
                   <Badge status={p.status} />
-                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'DM Mono', flexShrink: 0, marginLeft: 8 }}>{new Date(p.created_at).toLocaleDateString('de')}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'DM Mono', marginLeft: 8 }}>{new Date(p.created_at).toLocaleDateString('de')}</div>
                 </div>
               ))}
             </div>
@@ -538,7 +631,7 @@ export default function AdminPage() {
               <div style={s.card}>
                 <div style={{ fontWeight: 700, marginBottom: 14 }}>{editCId ? '✏️ Bearbeiten' : '＋ Neuer Kunde'}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {[['name', 'Kundenname *', 'Restaurant Bella Italia'], ['instagram', 'Instagram', '@handle'], ['facebook', 'Facebook', 'seitenname'], ['industry', 'Branche', 'Gastronomie, Fitness…'], ['tone', 'Tonalität', 'locker, professionell…'], ['slug', 'URL-Slug (für Kundenlink)', 'bella-italia']].map(([field, lbl, ph]) => (
+                  {[['name', 'Kundenname *', 'Restaurant Bella Italia'], ['instagram', 'Instagram', '@handle'], ['facebook', 'Facebook', 'seitenname'], ['industry', 'Branche', 'Gastronomie…'], ['tone', 'Tonalität', 'locker, professionell…'], ['slug', 'URL-Slug', 'bella-italia']].map(([field, lbl, ph]) => (
                     <div key={field}><label style={s.label}>{lbl}</label><input value={cForm[field]} onChange={e => setCForm((f: any) => ({ ...f, [field]: e.target.value }))} placeholder={ph as string} style={s.input} /></div>
                   ))}
                   <div><label style={s.label}>Beschreibung</label><textarea value={cForm.description} onChange={e => setCForm((f: any) => ({ ...f, description: e.target.value }))} style={{ ...s.input, resize: 'vertical', minHeight: 72 }} /></div>
