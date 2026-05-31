@@ -5,7 +5,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, customer } = await req.json()
+    const { imageBase64, customer, customPrompt } = await req.json()
 
     if (!imageBase64 || !customer) {
       return NextResponse.json({ error: 'Missing imageBase64 or customer' }, { status: 400 })
@@ -17,6 +17,7 @@ Branche: ${customer.industry || '–'}, Tonalität: ${customer.tone || 'professi
 Beschreibung: ${customer.description || '–'},
 Referenz-Accounts: ${customer.refs?.join(', ') || 'keine'},
 Sprache: ${customer.lang === 'de' ? 'Deutsch' : 'Englisch'}.
+${customPrompt ? `\nBESONDERE ANWEISUNGEN FÜR DIESEN BEITRAG (unbedingt beachten):\n${customPrompt}` : ''}
 
 Antworte NUR mit validem JSON ohne Markdown-Backticks:
 {"ig":"...","fb":"...","tags":["tag1","tag2",...]}`
