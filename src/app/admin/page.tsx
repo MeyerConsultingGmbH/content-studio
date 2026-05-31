@@ -34,11 +34,8 @@ function NavItem({ icon, label, active, badge, onClick }: any) {
 
 function Badge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
-    pending: ['#6B778520', '#6B7785'],
-    review: ['#FF900020', '#FF9000'],
-    kunde: ['#FFD44720', '#FFD447'],
-    approved: ['#3BFFA020', '#3BFFA0'],
-    rejected: ['#FF575720', '#FF5757'],
+    pending: ['#6B778520', '#6B7785'], review: ['#FF900020', '#FF9000'],
+    kunde: ['#FFD44720', '#FFD447'], approved: ['#3BFFA020', '#3BFFA0'], rejected: ['#FF575720', '#FF5757'],
   }
   const labels: Record<string, string> = { pending: '⏳ Entwurf', review: '👁 Prüfung', kunde: '📤 Beim Kunden', approved: '✓ Freigegeben', rejected: '✕ Abgelehnt' }
   const [bg, color] = map[status] || map.pending
@@ -52,6 +49,45 @@ function CopyBtn({ text }: { text: string }) {
       style={{ position: 'absolute', top: 9, right: 9, padding: '4px 9px', fontSize: 10, borderRadius: 5, background: '#1A1F25', border: '1px solid var(--border)', color: ok ? 'var(--accent)' : 'var(--muted)', cursor: 'pointer' }}>
       {ok ? '✓' : 'Kopieren'}
     </button>
+  )
+}
+
+// ── Hashtag Picker ─────────────────────────────────────────────────────────────
+function HashtagPicker({ tags, selected, onChange }: { tags: string[], selected: string[], onChange: (s: string[]) => void }) {
+  const toggle = (t: string) => {
+    if (selected.includes(t)) onChange(selected.filter(x => x !== t))
+    else if (selected.length < 15) onChange([...selected, t])
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.6px' }}># Hashtags wählen</div>
+        <div style={{ fontSize: 11, color: selected.length >= 15 ? 'var(--accent)' : 'var(--muted)', fontWeight: 600 }}>
+          {selected.length}/15 gewählt
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {tags.map((t, i) => {
+          const isSelected = selected.includes(t)
+          const maxReached = selected.length >= 15 && !isSelected
+          return (
+            <button key={i} onClick={() => toggle(t)} disabled={maxReached}
+              style={{
+                background: isSelected ? 'var(--accent)' : '#1A1F25',
+                color: isSelected ? '#000' : maxReached ? '#333' : 'var(--muted)',
+                border: `1px solid ${isSelected ? 'var(--accent)' : maxReached ? '#222' : 'var(--border)'}`,
+                borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+                cursor: maxReached ? 'not-allowed' : 'pointer', transition: 'all .15s'
+              }}>
+              #{t.replace(/^#/, '')}
+            </button>
+          )
+        })}
+      </div>
+      {selected.length >= 15 && (
+        <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 8 }}>✓ Maximum von 15 Hashtags erreicht</div>
+      )}
+    </div>
   )
 }
 
@@ -77,11 +113,7 @@ function Cropper({ src, onCrop, onCancel }: { src: string, onCrop: (url: string,
     img.src = src
   }, [src])
 
-  const getXY = (e: any) => {
-    const t = e.touches ? e.touches[0] : e
-    const r = wrapRef.current!.getBoundingClientRect()
-    return { x: t.clientX - r.left, y: t.clientY - r.top }
-  }
+  const getXY = (e: any) => { const t = e.touches ? e.touches[0] : e; const r = wrapRef.current!.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top } }
   const startMove = (e: any) => { e.preventDefault(); const { x, y } = getXY(e); drag.current = { type: 'move', sx: x, sy: y, ...box } }
   const startResize = (e: any) => { e.preventDefault(); e.stopPropagation(); const { x } = getXY(e); drag.current = { type: 'resize', sx: x, ...box } }
   const onMove = useCallback((e: any) => {
@@ -96,8 +128,7 @@ function Cropper({ src, onCrop, onCancel }: { src: string, onCrop: (url: string,
     const ctx = canvas.getContext('2d')!; const img = new Image()
     img.onload = () => {
       ctx.drawImage(img, box.x * nat.w / disp.w, box.y * nat.h / disp.h, box.w * nat.w / disp.w, box.h * nat.h / disp.h, 0, 0, 1080, 1350)
-      const url = canvas.toDataURL('image/jpeg', 0.92)
-      onCrop(url, url.split(',')[1])
+      const url = canvas.toDataURL('image/jpeg', 0.92); onCrop(url, url.split(',')[1])
     }; img.src = src
   }
 
@@ -128,7 +159,7 @@ function Cropper({ src, onCrop, onCancel }: { src: string, onCrop: (url: string,
   )
 }
 
-// ── PostCard (with image replace + regenerate) ─────────────────────────────────
+// ── PostCard ───────────────────────────────────────────────────────────────────
 function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, customers: Customer[], onUpdate: (patch: Partial<Post>) => void, onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -137,34 +168,25 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
   const [comments, setComments] = useState<Comment[]>([])
   const [showComments, setShowComments] = useState(false)
   const [newComment, setNewComment] = useState('')
-  const [loadingComments, setLoadingComments] = useState(false)
-
-  // ── Image replace state ──
   const [showImageReplace, setShowImageReplace] = useState(false)
   const [newRawImg, setNewRawImg] = useState<string | null>(null)
   const [showCropReplace, setShowCropReplace] = useState(false)
-  const imgReplaceRef = useRef<HTMLInputElement>(null)
-
-  // ── Regenerate state ──
   const [regenerating, setRegenerating] = useState(false)
   const [regenErr, setRegenErr] = useState('')
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const imgReplaceRef = useRef<HTMLInputElement>(null)
 
   const loadComments = async () => {
-    setLoadingComments(true)
     const { data } = await supabase.from('comments').select('*').eq('post_id', post.id).order('created_at', { ascending: true })
     setComments(data || [])
-    setLoadingComments(false)
   }
-
   const toggleComments = () => { if (!showComments) loadComments(); setShowComments(v => !v) }
-
   const addComment = async () => {
     if (!newComment.trim()) return
     await supabase.from('comments').insert({ post_id: post.id, author: 'admin', text: newComment.trim() })
     setNewComment(''); loadComments()
   }
 
-  // ── Handle image replace ──
   const handleReplaceFile = (file: File) => {
     if (!file || !file.type.startsWith('image/')) return
     const r = new FileReader()
@@ -172,44 +194,19 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
     r.readAsDataURL(file)
   }
 
-  const onReplaceCropped = async (url: string) => {
-    await onUpdate({ image_url: url })
-    setShowImageReplace(false); setNewRawImg(null); setShowCropReplace(false)
-  }
-
-  // ── Regenerate text with same image ──
   const regenerate = async () => {
     setRegenerating(true); setRegenErr('')
     const cust = customers.find(c => c.id === post.customer_id)
     if (!cust) { setRegenErr('Kunde nicht gefunden'); setRegenerating(false); return }
-
-    // Need base64 from current image
-    let imageB64 = ''
     try {
-      const res = await fetch(post.image_url)
-      const blob = await res.blob()
-      imageB64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve((reader.result as string).split(',')[1])
-        reader.readAsDataURL(blob)
-      })
-    } catch {
-      setRegenErr('Bild konnte nicht geladen werden'); setRegenerating(false); return
-    }
-
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: imageB64, customer: cust })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Fehler')
+      const res = await fetch(post.image_url); const blob = await res.blob()
+      const imageB64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.readAsDataURL(blob) })
+      const r2 = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: imageB64, customer: cust }) })
+      const data = await r2.json()
+      if (!r2.ok) throw new Error(data.error || 'Fehler')
       await onUpdate({ ig_text: data.ig, fb_text: data.fb, ig_edit: data.ig, fb_edit: data.fb, hashtags: data.tags })
       setIgE(data.ig); setFbE(data.fb)
-    } catch (e: any) {
-      setRegenErr(e.message)
-    }
+    } catch (e: any) { setRegenErr(e.message) }
     setRegenerating(false)
   }
 
@@ -220,24 +217,27 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
     { s: 'rejected', label: '✕ Ablehnen', bg: '#FF575715', color: '#FF5757', border: '#FF575730' },
   ].filter(b => b.s !== post.status)
 
+  const pubDate = (post as any).publish_date
+  const formattedDate = pubDate ? new Date(pubDate).toLocaleDateString('de', { day: '2-digit', month: 'short', year: 'numeric' }) : null
+
   return (
     <div style={{ ...s.card, padding: 0, overflow: 'hidden', marginBottom: 14 }}>
       <div style={{ display: 'flex' }}>
         <div style={{ width: 80, flexShrink: 0, position: 'relative' }}>
-          {post.image_url
-            ? <img src={post.image_url} style={{ width: 80, height: 100, objectFit: 'cover', display: 'block' }} alt="" />
-            : <div style={{ width: 80, height: 100, background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: 'var(--border)' }}>📷</div>}
-          {/* Image replace button overlay */}
-          <button
-            onClick={() => { setShowImageReplace(v => !v); setShowCropReplace(false); setNewRawImg(null) }}
-            title="Bild ersetzen"
-            style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,.75)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 5, color: '#fff', fontSize: 12, padding: '3px 5px', cursor: 'pointer' }}>
-            🔄
-          </button>
+          {post.image_url ? <img src={post.image_url} style={{ width: 80, height: 100, objectFit: 'cover', display: 'block' }} alt="" /> : <div style={{ width: 80, height: 100, background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, color: 'var(--border)' }}>📷</div>}
+          <button onClick={() => { setShowImageReplace(v => !v); setShowCropReplace(false); setNewRawImg(null) }} title="Bild ersetzen"
+            style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,.75)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 5, color: '#fff', fontSize: 12, padding: '3px 5px', cursor: 'pointer' }}>🔄</button>
         </div>
         <div style={{ flex: 1, padding: '12px 14px', minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{post.customer_name}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{new Date(post.created_at).toLocaleDateString('de', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{new Date(post.created_at).toLocaleDateString('de', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+            {/* Publish date badge */}
+            {formattedDate
+              ? <span style={{ background: '#3BFFA015', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '2px 8px', fontSize: 10, fontWeight: 700, cursor: 'pointer' }} onClick={() => setShowDatePicker(v => !v)}>📅 {formattedDate}</span>
+              : <button onClick={() => setShowDatePicker(v => !v)} style={{ background: 'transparent', border: '1px dashed var(--border)', borderRadius: 20, padding: '2px 8px', fontSize: 10, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>📅 Datum setzen</button>
+            }
+          </div>
           <Badge status={post.status} />
           <div style={{ marginTop: 6, fontSize: 12, color: '#9AABB8', lineHeight: 1.4, display: expanded ? undefined : '-webkit-box', WebkitLineClamp: expanded ? undefined : 2 as any, WebkitBoxOrient: expanded ? undefined : 'vertical' as any, overflow: expanded ? undefined : 'hidden' }}>
             {post.ig_edit || post.ig_text}
@@ -248,30 +248,35 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
         </div>
       </div>
 
+      {/* Date picker panel */}
+      {showDatePicker && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px', background: '#0A0D10', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>📅 Veröffentlichungsdatum</div>
+          <input type="date" defaultValue={pubDate ? pubDate.substring(0, 10) : ''}
+            style={{ ...s.input, width: 'auto', fontSize: 13 }}
+            onChange={e => onUpdate({ publish_date: e.target.value } as any)} />
+          {pubDate && <button onClick={() => { onUpdate({ publish_date: null } as any); setShowDatePicker(false) }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 12 }}>✕ Entfernen</button>}
+          <button onClick={() => setShowDatePicker(false)} style={{ ...s.btnGhost, ...s.btnXs, marginLeft: 'auto' }}>Schließen</button>
+        </div>
+      )}
+
       {/* Image replace panel */}
       {showImageReplace && (
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
-          {!showCropReplace && (
+          {!showCropReplace ? (
             <div>
               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--accent)' }}>🔄 Bild ersetzen</div>
-              <div
-                style={{ ...s.dropZone, padding: '20px' }}
-                onClick={() => imgReplaceRef.current?.click()}>
+              <div style={{ ...s.dropZone, padding: '20px' }} onClick={() => imgReplaceRef.current?.click()}>
                 <div style={{ fontSize: 24, marginBottom: 6 }}>📷</div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>Neues Bild auswählen</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>JPG · PNG · WEBP</div>
               </div>
-              <input ref={imgReplaceRef} type="file" accept="image/*" style={{ display: 'none' }}
-                onChange={e => handleReplaceFile(e.target.files![0])} />
+              <input ref={imgReplaceRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleReplaceFile(e.target.files![0])} />
               <button onClick={() => setShowImageReplace(false)} style={{ ...s.btnGhost, ...s.btnSm, marginTop: 8 }}>Abbrechen</button>
             </div>
-          )}
-          {showCropReplace && newRawImg && (
-            <Cropper
-              src={newRawImg}
-              onCrop={(url) => onReplaceCropped(url)}
-              onCancel={() => { setShowCropReplace(false); setNewRawImg(null) }}
-            />
+          ) : newRawImg && (
+            <Cropper src={newRawImg} onCrop={async (url) => { await onUpdate({ image_url: url }); setShowImageReplace(false); setNewRawImg(null); setShowCropReplace(false) }} onCancel={() => { setShowCropReplace(false); setNewRawImg(null) }} />
           )}
         </div>
       )}
@@ -284,10 +289,7 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
             {b.label}
           </button>
         ))}
-        {/* Regenerate button */}
-        <button
-          onClick={regenerate}
-          disabled={regenerating}
+        <button onClick={regenerate} disabled={regenerating}
           style={{ background: '#A78BFA20', color: '#A78BFA', border: '1px solid #A78BFA40', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 700, cursor: regenerating ? 'not-allowed' : 'pointer', opacity: regenerating ? 0.6 : 1 }}>
           {regenerating ? '⏳ Neu...' : '✨ Text neu'}
         </button>
@@ -298,13 +300,11 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
         <button onClick={onDelete} style={{ background: '#FF575715', color: '#FF5757', border: '1px solid #FF575730', borderRadius: 6, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}>🗑</button>
       </div>
 
-      {/* Regen error */}
       {regenErr && <div style={{ padding: '8px 14px', background: '#FF575710', color: '#FF5757', fontSize: 12 }}>⚠️ {regenErr}</div>}
 
       {/* Comments */}
       {showComments && (
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
-          {loadingComments && <div style={{ color: 'var(--muted)', fontSize: 13 }}>Lade...</div>}
           {comments.map(c => (
             <div key={c.id} style={{ marginBottom: 10, padding: 10, background: c.author === 'admin' ? '#1A2A1A' : '#1A1A2A', borderRadius: 8, borderLeft: `3px solid ${c.author === 'admin' ? 'var(--accent)' : '#A78BFA'}` }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: c.author === 'admin' ? 'var(--accent)' : '#A78BFA', marginBottom: 3 }}>
@@ -315,9 +315,7 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
             </div>
           ))}
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <input value={newComment} onChange={e => setNewComment(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addComment()}
-              placeholder="Kommentar..." style={{ ...s.input, flex: 1, fontSize: 13 }} />
+            <input value={newComment} onChange={e => setNewComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && addComment()} placeholder="Kommentar..." style={{ ...s.input, flex: 1, fontSize: 13 }} />
             <button onClick={addComment} style={{ ...s.btnPrimary, ...s.btnSm, flexShrink: 0 }}>Senden</button>
           </div>
         </div>
@@ -326,16 +324,8 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
       {/* Edit panel */}
       {editing && (
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
-          <div style={{ marginBottom: 10 }}>
-            <label style={s.label}>📸 Instagram</label>
-            <textarea value={igE} onChange={e => setIgE(e.target.value)} rows={4}
-              style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} />
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={s.label}>📘 Facebook</label>
-            <textarea value={fbE} onChange={e => setFbE(e.target.value)} rows={4}
-              style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} />
-          </div>
+          <div style={{ marginBottom: 10 }}><label style={s.label}>📸 Instagram</label><textarea value={igE} onChange={e => setIgE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
+          <div style={{ marginBottom: 12 }}><label style={s.label}>📘 Facebook</label><textarea value={fbE} onChange={e => setFbE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => { onUpdate({ ig_edit: igE, fb_edit: fbE }); setEditing(false) }} style={{ ...s.btnPrimary, ...s.btnSm }}>Speichern</button>
             <button onClick={() => setEditing(false)} style={{ ...s.btnGhost, ...s.btnSm }}>Abbrechen</button>
@@ -364,25 +354,22 @@ export default function AdminPage() {
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [errMsg, setErrMsg] = useState('')
-  const [dragover, setDragover] = useState(false)
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [publishDate, setPublishDate] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
-
   const blankC = { name: '', instagram: '', facebook: '', industry: '', tone: '', description: '', refs: [], lang: 'de', slug: '' }
   const [cForm, setCForm] = useState<any>(blankC)
   const [editCId, setEditCId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [custFilter, setCustFilter] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !localStorage.getItem('cs_admin')) router.push('/')
-  }, [])
-
+  useEffect(() => { if (typeof window !== 'undefined' && !localStorage.getItem('cs_admin')) router.push('/') }, [])
   useEffect(() => { loadAll() }, [])
 
   const loadAll = async () => {
     const [{ data: custs }, { data: ps }] = await Promise.all([
       supabase.from('customers').select('*').order('created_at', { ascending: true }),
-      supabase.from('posts').select('*').order('created_at', { ascending: false })
+      supabase.from('posts').select('*').order('publish_date', { ascending: true, nullsFirst: false })
     ])
     setCustomers(custs || [])
     setPosts(ps || [])
@@ -391,39 +378,33 @@ export default function AdminPage() {
   const handleFile = useCallback((file: File) => {
     if (!file || !file.type.startsWith('image/')) return
     const r = new FileReader()
-    r.onload = ev => { setRawImg(ev.target?.result as string); setCroppedImg(null); setCroppedB64(null); setResult(null); setErrMsg(''); setShowCrop(true) }
+    r.onload = ev => { setRawImg(ev.target?.result as string); setCroppedImg(null); setCroppedB64(null); setResult(null); setErrMsg(''); setSelectedTags([]); setShowCrop(true) }
     r.readAsDataURL(file)
   }, [])
 
   const generate = async () => {
     if (!selCust || !croppedB64) return
-    setGenerating(true); setResult(null); setErrMsg('')
+    setGenerating(true); setResult(null); setErrMsg(''); setSelectedTags([])
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: croppedB64, customer: selCust })
-      })
+      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
+      // Auto-select first 15
+      setSelectedTags((data.tags || []).slice(0, 15))
     } catch (e: any) { setErrMsg(e.message) }
     setGenerating(false)
   }
 
-  // ── Regenerate from generate tab ──
   const regenerateFromTab = async () => {
     if (!selCust || !croppedB64) return
-    setGenerating(true); setErrMsg('')
+    setGenerating(true); setErrMsg(''); setSelectedTags([])
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: croppedB64, customer: selCust })
-      })
+      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
+      setSelectedTags((data.tags || []).slice(0, 15))
     } catch (e: any) { setErrMsg(e.message) }
     setGenerating(false)
   }
@@ -433,11 +414,18 @@ export default function AdminPage() {
     const { data } = await supabase.from('posts').insert({
       customer_id: selCust.id, customer_name: selCust.name,
       image_url: croppedImg, ig_text: result.ig, fb_text: result.fb,
-      ig_edit: result.ig, fb_edit: result.fb, hashtags: result.tags,
-      status: toKunde ? 'kunde' : 'pending'
+      ig_edit: result.ig, fb_edit: result.fb,
+      hashtags: selectedTags.length > 0 ? selectedTags : result.tags,
+      status: toKunde ? 'kunde' : 'pending',
+      publish_date: publishDate || null,
     }).select().single()
-    if (data) setPosts(p => [data, ...p])
-    setResult(null); setCroppedImg(null); setCroppedB64(null); setRawImg(null)
+    if (data) setPosts(p => [...p, data].sort((a, b) => {
+      if (!a.publish_date && !b.publish_date) return 0
+      if (!a.publish_date) return 1
+      if (!b.publish_date) return -1
+      return new Date(a.publish_date).getTime() - new Date(b.publish_date).getTime()
+    }))
+    setResult(null); setCroppedImg(null); setCroppedB64(null); setRawImg(null); setSelectedTags([]); setPublishDate('')
     setNav(toKunde ? 'abnahme' : 'board')
   }
 
@@ -474,7 +462,13 @@ export default function AdminPage() {
     { id: 'customers', icon: '◈', label: 'Kunden' },
   ]
 
-  const filteredPosts = posts.filter(p => (statusFilter === 'all' || p.status === statusFilter) && (!custFilter || p.customer_id === custFilter))
+  // Sort posts: by publish_date asc, nulls last
+  const sortedPosts = [...posts].sort((a, b) => {
+    const ad = (a as any).publish_date, bd = (b as any).publish_date
+    if (!ad && !bd) return 0; if (!ad) return 1; if (!bd) return -1
+    return new Date(ad).getTime() - new Date(bd).getTime()
+  })
+  const filteredPosts = sortedPosts.filter(p => (statusFilter === 'all' || p.status === statusFilter) && (!custFilter || p.customer_id === custFilter))
 
   return (
     <div style={s.shell}>
@@ -491,12 +485,12 @@ export default function AdminPage() {
 
         {/* GENERATE */}
         {nav === 'generate' && <>
-          <div style={s.topbar}><div><div style={{ fontSize: 18, fontWeight: 800 }}>Beitrag erstellen</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Bild · Zuschnitt · KI-Text · Zum Kunden</div></div></div>
+          <div style={s.topbar}><div><div style={{ fontSize: 18, fontWeight: 800 }}>Beitrag erstellen</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Bild · Zuschnitt · KI-Text · Hashtags wählen · Zum Kunden</div></div></div>
           <div style={s.body}>
             <div style={s.label}>① Kunde wählen</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10, marginBottom: 20 }}>
               {customers.map(c => (
-                <div key={c.id} onClick={() => { setSelCust(c); setResult(null) }}
+                <div key={c.id} onClick={() => { setSelCust(c); setResult(null); setSelectedTags([]) }}
                   style={{ background: selCust?.id === c.id ? 'var(--accent-dim)' : 'var(--card)', border: `2px solid ${selCust?.id === c.id ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 10, padding: 12, cursor: 'pointer' }}>
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: 'var(--accent)', marginBottom: 7 }}>{c.name[0]}</div>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{c.name}</div>
@@ -510,9 +504,7 @@ export default function AdminPage() {
                 <div style={s.label}>② Bild hochladen &amp; zuschneiden</div>
                 {!showCrop && !croppedImg && (
                   <div style={s.dropZone} onClick={() => fileRef.current?.click()}
-                    onDragOver={e => { e.preventDefault(); setDragover(true) }}
-                    onDragLeave={() => setDragover(false)}
-                    onDrop={e => { e.preventDefault(); setDragover(false); handleFile(e.dataTransfer.files[0]) }}>
+                    onDragOver={e => { e.preventDefault() }} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }}>
                     <div style={{ fontSize: 36, marginBottom: 10 }}>📷</div>
                     <div style={{ fontWeight: 700, marginBottom: 3 }}>Bild ablegen</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)' }}>JPG · PNG · WEBP</div>
@@ -528,11 +520,23 @@ export default function AdminPage() {
                     <img src={croppedImg} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} alt="" />
                     <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                       <button onClick={generate} disabled={generating} style={{ ...s.btnPrimary, flex: 1 }}>{generating ? '⏳ Generiere...' : '✦ Beitrag generieren'}</button>
-                      <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg('') }} style={s.btnGhost}>✕</button>
+                      <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg(''); setSelectedTags([]) }} style={s.btnGhost}>✕</button>
                     </div>
                   </div>
                 )}
                 <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files![0])} />
+
+                {/* Publish date picker */}
+                {croppedImg && (
+                  <div style={{ marginTop: 14, ...s.card }}>
+                    <div style={s.label}>📅 Veröffentlichungsdatum (optional)</div>
+                    <input type="date" value={publishDate} onChange={e => setPublishDate(e.target.value)}
+                      style={{ ...s.input, fontSize: 13 }} />
+                    {publishDate && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 6 }}>
+                      Geplant: {new Date(publishDate).toLocaleDateString('de', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    </div>}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -548,10 +552,19 @@ export default function AdminPage() {
                   <div style={s.resultBlock}>{result.ig}<CopyBtn text={result.ig} /></div>
                   <div style={{ ...s.label, marginTop: 12 }}>📘 Facebook</div>
                   <div style={s.resultBlock}>{result.fb}<CopyBtn text={result.fb} /></div>
-                  <div style={{ ...s.label, marginTop: 12, marginBottom: 7 }}># Hashtags</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{result.tags?.map((t: string, i: number) => <span key={i} style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>#{t.replace(/^#/, '')}</span>)}</div>
+
+                  {/* Hashtag Picker */}
+                  <div style={{ marginTop: 16, padding: 14, background: '#0A0D10', borderRadius: 10, border: '1px solid var(--border)' }}>
+                    <HashtagPicker tags={result.tags || []} selected={selectedTags} onChange={setSelectedTags} />
+                    {selectedTags.length > 0 && (
+                      <button onClick={() => navigator.clipboard.writeText(selectedTags.map(t => '#' + t.replace(/^#/, '')).join(' '))}
+                        style={{ marginTop: 10, background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                        📋 Gewählte Hashtags kopieren
+                      </button>
+                    )}
+                  </div>
+
                   <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />
-                  {/* Regenerate button */}
                   <button onClick={regenerateFromTab} disabled={generating}
                     style={{ width: '100%', background: '#A78BFA20', color: '#A78BFA', border: '1px solid #A78BFA40', borderRadius: 8, padding: 10, fontWeight: 700, fontSize: 13, cursor: generating ? 'not-allowed' : 'pointer', marginBottom: 8 }}>
                     {generating ? '⏳ Generiere neu...' : '✨ Anderen Text generieren'}
@@ -569,7 +582,7 @@ export default function AdminPage() {
 
         {/* BOARD */}
         {nav === 'board' && <>
-          <div style={s.topbar}><div style={{ fontSize: 18, fontWeight: 800 }}>Freigabe-Board</div></div>
+          <div style={s.topbar}><div style={{ fontSize: 18, fontWeight: 800 }}>Freigabe-Board</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Sortiert nach Veröffentlichungsdatum</div></div>
           <div style={s.body}>
             <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 12, overflowX: 'auto' }}>
               {[null, ...customers].map((c: any) => <button key={c?.id || 'all'} onClick={() => setCustFilter(c?.id || null)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: custFilter === (c?.id || null) ? 'var(--accent)' : 'transparent', color: custFilter === (c?.id || null) ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>{c?.name || 'Alle'}</button>)}
@@ -588,16 +601,16 @@ export default function AdminPage() {
         {/* ABNAHME */}
         {nav === 'abnahme' && <>
           <div style={s.topbar}>
-            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div></div>
+            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Sortiert nach Veröffentlichungsdatum</div></div>
             {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, borderRadius: 8, padding: '8px 14px', fontSize: 12 }}>👁 Kundenansicht</a>}
           </div>
           <div style={s.body}>
             <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
               {customers.map(c => <button key={c.id} onClick={() => setSelCust(c)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: selCust?.id === c.id ? 'var(--accent)' : 'transparent', color: selCust?.id === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{c.name}</button>)}
             </div>
-            {posts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).length === 0
+            {sortedPosts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).length === 0
               ? <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Keine Beiträge beim Kunden</div>
-              : posts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)
+              : sortedPosts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)
             }
           </div>
         </>}
@@ -608,17 +621,22 @@ export default function AdminPage() {
           <div style={s.body}>
             <div style={{ ...s.card, padding: 0, overflow: 'hidden' }}>
               {posts.length === 0 && <div style={{ textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Noch nichts gespeichert</div>}
-              {posts.map((p, i) => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: i < posts.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                  {p.image_url ? <img src={p.image_url} style={{ width: 36, height: 45, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} alt="" /> : <div style={{ width: 36, height: 45, borderRadius: 6, background: 'var(--surface)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📷</div>}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{p.customer_name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(p.ig_edit || p.ig_text)?.substring(0, 60)}…</div>
+              {sortedPosts.map((p, i) => {
+                const pd = (p as any).publish_date
+                return (
+                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderBottom: i < posts.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    {p.image_url ? <img src={p.image_url} style={{ width: 36, height: 45, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} alt="" /> : <div style={{ width: 36, height: 45, borderRadius: 6, background: 'var(--surface)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📷</div>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{p.customer_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(p.ig_edit || p.ig_text)?.substring(0, 60)}…</div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                      <Badge status={p.status} />
+                      {pd && <span style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>📅 {new Date(pd).toLocaleDateString('de', { day: '2-digit', month: 'short' })}</span>}
+                    </div>
                   </div>
-                  <Badge status={p.status} />
-                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'DM Mono', marginLeft: 8 }}>{new Date(p.created_at).toLocaleDateString('de')}</div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </>}
