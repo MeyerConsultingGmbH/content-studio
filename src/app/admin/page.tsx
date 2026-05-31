@@ -356,6 +356,7 @@ export default function AdminPage() {
   const [errMsg, setErrMsg] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [publishDate, setPublishDate] = useState('')
+  const [customPrompt, setCustomPrompt] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const blankC = { name: '', instagram: '', facebook: '', industry: '', tone: '', description: '', refs: [], lang: 'de', slug: '' }
   const [cForm, setCForm] = useState<any>(blankC)
@@ -386,7 +387,7 @@ export default function AdminPage() {
     if (!selCust || !croppedB64) return
     setGenerating(true); setResult(null); setErrMsg(''); setSelectedTags([])
     try {
-      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust }) })
+      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust, customPrompt }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
@@ -400,7 +401,7 @@ export default function AdminPage() {
     if (!selCust || !croppedB64) return
     setGenerating(true); setErrMsg(''); setSelectedTags([])
     try {
-      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust }) })
+      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust, customPrompt }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
@@ -520,11 +521,31 @@ export default function AdminPage() {
                     <img src={croppedImg} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} alt="" />
                     <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                       <button onClick={generate} disabled={generating} style={{ ...s.btnPrimary, flex: 1 }}>{generating ? '⏳ Generiere...' : '✦ Beitrag generieren'}</button>
-                      <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg(''); setSelectedTags([]) }} style={s.btnGhost}>✕</button>
+                      <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg(''); setSelectedTags([]); setCustomPrompt('') }} style={s.btnGhost}>✕</button>
                     </div>
                   </div>
                 )}
                 <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files![0])} />
+
+                {/* Custom prompt field */}
+                {croppedImg && (
+                  <div style={{ marginTop: 14, ...s.card }}>
+                    <div style={s.label}>✍️ Zusätzliche Anweisungen (optional)</div>
+                    <textarea
+                      value={customPrompt}
+                      onChange={e => setCustomPrompt(e.target.value)}
+                      placeholder={`z.B. "Erwähne das neue Mittagsmenü", "Mehr Emojis", "Kürzer und knackiger", "Schreibe auf Englisch"...`}
+                      rows={3}
+                      style={{ ...s.input, resize: 'vertical', minHeight: 72, lineHeight: 1.5, fontSize: 13 }}
+                    />
+                    {customPrompt && (
+                      <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        ✓ Wird beim nächsten Generieren berücksichtigt
+                        <button onClick={() => setCustomPrompt('')} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕ Löschen</button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Publish date picker */}
                 {croppedImg && (
