@@ -380,6 +380,180 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
   )
 }
 
+// ── Kalender View ──────────────────────────────────────────────────────────────
+function KalenderView({ posts, customers, onUpdate }: { posts: Post[], customers: Customer[], onUpdate: (id: string, patch: Partial<Post>) => void }) {
+  const today = new Date()
+  const [viewYear, setViewYear] = useState(today.getFullYear())
+  const [viewMonth, setViewMonth] = useState(today.getMonth())
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null)
+  const [calCustFilter, setCalCustFilter] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const approvedPosts = posts.filter(p => p.status === 'approved' && (p as any).publish_date && (!calCustFilter || p.customer_id === calCustFilter))
+
+  // Build calendar days
+  const firstDay = new Date(viewYear, viewMonth, 1)
+  const lastDay = new Date(viewYear, viewMonth + 1, 0)
+  const startOffset = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1 // Mon=0
+  const totalDays = lastDay.getDate()
+  const weeks: (number | null)[][] = []
+  let week: (number | null)[] = Array(startOffset).fill(null)
+  for (let d = 1; d <= totalDays; d++) {
+    week.push(d)
+    if (week.length === 7) { weeks.push(week); week = [] }
+  }
+  if (week.length > 0) { while (week.length < 7) week.push(null); weeks.push(week) }
+
+  const getPostsForDay = (day: number) => {
+    const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    return approvedPosts.filter(p => (p as any).publish_date?.substring(0, 10) === dateStr)
+  }
+
+  const monthNames = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
+  const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+
+  const copyPostText = (post: Post) => {
+    const text = `INSTAGRAM:\n${post.ig_edit || post.ig_text}\n\nFACEBOOK:\n${post.fb_edit || post.fb_text}\n\nHASHTAGS:\n${post.hashtags?.map(t => '#' + t.replace(/^#/, '')).join(' ')}`
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const customerColors: Record<string, string> = {}
+  const palette = ['#3BFFA0', '#FFD447', '#A78BFA', '#FF9000', '#4FA3FF', '#FF5757']
+  customers.forEach((c, i) => { customerColors[c.id] = palette[i % palette.length] })
+
+  return (
+    <>
+      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky' as const, top: 0, background: 'var(--bg)', zIndex: 50 }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>📅 Kalender</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>Freigegebene Beiträge mit Veröffentlichungsdatum</div>
+        </div>
+        <a href="https://business.facebook.com/latest/home" target="_blank"
+          style={{ background: '#1877F2', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontWeight: 700, fontSize: 12, cursor: 'pointer', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          📘 Meta Business Suite öffnen
+        </a>
+      </div>
+
+      <div style={{ padding: '20px 24px 60px' }}>
+        {/* Customer filter */}
+        <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
+          <button onClick={() => setCalCustFilter(null)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: !calCustFilter ? 'var(--accent)' : 'transparent', color: !calCustFilter ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>Alle</button>
+          {customers.map(c => <button key={c.id} onClick={() => setCalCustFilter(c.id)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: calCustFilter === c.id ? customerColors[c.id] : 'transparent', color: calCustFilter === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>{c.name}</button>)}
+        </div>
+
+        {/* Month navigation */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <button onClick={() => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) } else setViewMonth(m => m - 1) }}
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 14px', color: 'var(--text)', cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>←</button>
+          <div style={{ fontWeight: 800, fontSize: 18 }}>{monthNames[viewMonth]} {viewYear}</div>
+          <button onClick={() => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1) } else setViewMonth(m => m + 1) }}
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 14px', color: 'var(--text)', cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>→</button>
+        </div>
+
+        {/* Calendar grid */}
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+          {/* Day headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--border)' }}>
+            {dayNames.map(d => <div key={d} style={{ padding: '10px 0', textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px' }}>{d}</div>)}
+          </div>
+          {/* Weeks */}
+          {weeks.map((week, wi) => (
+            <div key={wi} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: wi < weeks.length - 1 ? '1px solid var(--border)' : 'none' }}>
+              {week.map((day, di) => {
+                const dayPosts = day ? getPostsForDay(day) : []
+                const isToday = day === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear()
+                return (
+                  <div key={di} style={{ minHeight: 80, padding: '6px 8px', borderRight: di < 6 ? '1px solid var(--border)' : 'none', background: isToday ? '#3BFFA008' : 'transparent' }}>
+                    {day && (
+                      <>
+                        <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? 'var(--accent)' : 'var(--muted)', marginBottom: 4, width: 22, height: 22, borderRadius: '50%', background: isToday ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isToday ? '#000' : 'var(--muted)' }}>
+                          {day}
+                        </div>
+                        {dayPosts.map(p => (
+                          <div key={p.id} onClick={() => setSelectedPost(p)}
+                            style={{ marginBottom: 3, padding: '3px 6px', borderRadius: 5, background: `${customerColors[p.customer_id]}25`, borderLeft: `2px solid ${customerColors[p.customer_id]}`, cursor: 'pointer', fontSize: 10, fontWeight: 600, color: customerColors[p.customer_id], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.customer_name}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Legend */}
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
+          {customers.map(c => {
+            const count = approvedPosts.filter(p => p.customer_id === c.id).length
+            return count > 0 ? (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+                <div style={{ width: 10, height: 10, borderRadius: 3, background: customerColors[c.id] }} />
+                {c.name} ({count})
+              </div>
+            ) : null
+          })}
+        </div>
+
+        {/* Selected post detail */}
+        {selectedPost && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+            onClick={() => setSelectedPost(null)}>
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, maxWidth: 520, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}
+              onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 3 }}>{selectedPost.customer_name}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    📅 {new Date((selectedPost as any).publish_date).toLocaleDateString('de', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                  </div>
+                </div>
+                <button onClick={() => setSelectedPost(null)} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 22, lineHeight: 1 }}>×</button>
+              </div>
+
+              {selectedPost.image_url && <img src={selectedPost.image_url} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, marginBottom: 14 }} alt="" />}
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>📸 Instagram</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: '#C8D0D8', whiteSpace: 'pre-wrap', background: '#0A0D10', borderRadius: 8, padding: 12 }}>{selectedPost.ig_edit || selectedPost.ig_text}</div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>📘 Facebook</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: '#C8D0D8', whiteSpace: 'pre-wrap', background: '#0A0D10', borderRadius: 8, padding: 12 }}>{selectedPost.fb_edit || selectedPost.fb_text}</div>
+              </div>
+
+              {selectedPost.hashtags?.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}># Hashtags</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {selectedPost.hashtags.map((t, i) => <span key={i} style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '3px 10px', fontSize: 11, fontWeight: 600 }}>#{t.replace(/^#/, '')}</span>)}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button onClick={() => copyPostText(selectedPost)}
+                  style={{ width: '100%', background: copied ? 'var(--accent)' : 'var(--surface)', color: copied ? '#000' : 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                  {copied ? '✓ Kopiert!' : '📋 Text + Hashtags kopieren'}
+                </button>
+                <a href="https://business.facebook.com/latest/home" target="_blank"
+                  style={{ width: '100%', background: '#1877F2', color: '#fff', border: 'none', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  📘 In Meta Business Suite einplanen
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
 // ── Main Admin App ─────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const router = useRouter()
@@ -532,10 +706,12 @@ export default function AdminPage() {
 
   const pendingCount = posts.filter(p => p.status === 'pending' || p.status === 'review').length
   const kundeCount = posts.filter(p => p.status === 'kunde').length
+  const approvedCount = posts.filter(p => p.status === 'approved' && (p as any).publish_date).length
   const navItems = [
     { id: 'generate', icon: '✦', label: 'Erstellen' },
     { id: 'board', icon: '☰', label: 'Board', badge: pendingCount || null },
     { id: 'abnahme', icon: '📤', label: 'Abnahme', badge: kundeCount || null },
+    { id: 'kalender', icon: '📅', label: 'Kalender', badge: approvedCount || null },
     { id: 'log', icon: '◷', label: 'Log' },
     { id: 'customers', icon: '◈', label: 'Kunden' },
   ]
@@ -730,6 +906,9 @@ export default function AdminPage() {
             }
           </div>
         </>}
+
+        {/* KALENDER */}
+        {nav === 'kalender' && <KalenderView posts={sortedPosts} customers={customers} onUpdate={updatePost} />}
 
         {/* LOG */}
         {nav === 'log' && <>
