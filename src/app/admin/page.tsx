@@ -541,6 +541,14 @@ function KalenderView({ posts, customers, onUpdate }: { posts: Post[], customers
                   style={{ width: '100%', background: copied ? 'var(--accent)' : 'var(--surface)', color: copied ? '#000' : 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
                   {copied ? '✓ Kopiert!' : '📋 Text + Hashtags kopieren'}
                 </button>
+                {selectedPost.image_url && (
+                  <a
+                    href={selectedPost.image_url}
+                    download={`${selectedPost.customer_name}-${(selectedPost as any).publish_date || 'beitrag'}.jpg`}
+                    style={{ width: '100%', background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    ⬇️ Bild herunterladen (4:5)
+                  </a>
+                )}
                 <a href="https://business.facebook.com/latest/home" target="_blank"
                   style={{ width: '100%', background: '#1877F2', color: '#fff', border: 'none', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                   📘 In Meta Business Suite einplanen
