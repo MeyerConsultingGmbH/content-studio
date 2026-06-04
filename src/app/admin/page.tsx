@@ -403,9 +403,46 @@ export default function AdminPage() {
   const [editCId, setEditCId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [custFilter, setCustFilter] = useState<string | null>(null)
+  const [toasts, setToasts] = useState<{ id: number, msg: string, type: 'approved' | 'rejected' | 'comment' | 'info' }[]>([])
+
+  const addToast = (msg: string, type: 'approved' | 'rejected' | 'comment' | 'info' = 'info') => {
+    const id = Date.now()
+    setToasts(t => [...t, { id, msg, type }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 5000)
+  }
 
   useEffect(() => { if (typeof window !== 'undefined' && !localStorage.getItem('cs_admin')) router.push('/') }, [])
   useEffect(() => { loadAll() }, [])
+
+  // ── Realtime subscriptions ──
+  useEffect(() => {
+    // Listen for post status changes (customer approvals/rejections)
+    const postsSub = supabase
+      .channel('posts-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, (payload) => {
+        const updated = payload.new as any
+        setPosts(ps => ps.map(p => p.id === updated.id ? { ...p, ...updated } : p))
+        if (updated.status === 'approved') addToast(`✓ ${updated.customer_name} hat einen Beitrag freigegeben!`, 'approved')
+        if (updated.status === 'rejected') addToast(`✕ ${updated.customer_name} hat Änderungen angefordert`, 'rejected')
+      })
+      .subscribe()
+
+    // Listen for new comments
+    const commentsSub = supabase
+      .channel('comments-changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments' }, (payload) => {
+        const c = payload.new as any
+        if (c.author !== 'admin') {
+          addToast(`💬 Neuer Kommentar von ${c.author}`, 'comment')
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(postsSub)
+      supabase.removeChannel(commentsSub)
+    }
+  }, [])
 
   const loadAll = async () => {
     const [{ data: custs }, { data: ps }] = await Promise.all([
@@ -513,6 +550,24 @@ export default function AdminPage() {
 
   return (
     <div style={s.shell}>
+      {/* Toast notifications */}
+      <div style={{ position: 'fixed', top: 20, right: 20, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {toasts.map(t => {
+          const colors = {
+            approved: { bg: '#0A2A1A', border: '#3BFFA040', color: '#3BFFA0' },
+            rejected: { bg: '#2A0A0A', border: '#FF575740', color: '#FF5757' },
+            comment: { bg: '#1A1A2A', border: '#A78BFA40', color: '#A78BFA' },
+            info: { bg: '#1A1A1A', border: '#25283340', color: '#E8ECF0' },
+          }[t.type]
+          return (
+            <div key={t.id} style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '12px 16px', fontSize: 13, fontWeight: 600, color: colors.color, maxWidth: 320, boxShadow: '0 4px 20px rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, animation: 'slideIn .2s ease' }}>
+              <span>{t.msg}</span>
+              <button onClick={() => setToasts(ts => ts.filter(x => x.id !== t.id))} style={{ background: 'none', border: 'none', color: colors.color, cursor: 'pointer', fontSize: 16, opacity: 0.6, padding: 0 }}>×</button>
+            </div>
+          )
+        })}
+      </div>
+      <style>{`@keyframes slideIn { from { transform: translateX(20px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }`}</style>
       <div style={s.sidebar}>
         <div style={{ padding: '0 20px 24px', fontSize: 19, fontWeight: 800 }}>content<span style={{ color: 'var(--accent)' }}>.</span>studio</div>
         {navItems.map(n => <NavItem key={n.id} icon={n.icon} label={n.label} active={nav === n.id} badge={n.badge} onClick={() => setNav(n.id)} />)}
