@@ -91,7 +91,26 @@ function KundePostCard({ post, customerName, onUpdate }: { post: Post, customerN
         {/* Date + meta */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'DM Mono' }}>{new Date(post.created_at).toLocaleDateString('de', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
-          {pubDate && <span style={{ background: '#3BFFA015', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700 }}>📅 Geplant: {new Date(pubDate).toLocaleDateString('de', { day: '2-digit', month: 'long', year: 'numeric' })}</span>}
+          {pubDate && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ background: '#3BFFA015', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700 }}>
+                📅 Geplant: {new Date(pubDate).toLocaleDateString('de', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Customer date change */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, fontWeight: 600 }}>
+            {pubDate ? '📅 Veröffentlichungsdatum anpassen:' : '📅 Wunschdatum für Veröffentlichung:'}
+          </div>
+          <input type="date"
+            defaultValue={pubDate ? pubDate.substring(0, 10) : ''}
+            onChange={e => onUpdate({ publish_date: e.target.value } as any)}
+            style={{ background: '#0D1014', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: 8, padding: '8px 12px', fontSize: 14, outline: 'none', fontFamily: 'inherit', width: '100%' }}
+          />
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Du kannst das Datum jederzeit ändern</div>
         </div>
 
         {/* Platform tabs */}
