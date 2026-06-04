@@ -468,7 +468,7 @@ function KalenderView({ posts, customers, onUpdate }: { posts: Post[], customers
                   <div key={di} style={{ minHeight: 80, padding: '6px 8px', borderRight: di < 6 ? '1px solid var(--border)' : 'none', background: isToday ? '#3BFFA008' : 'transparent' }}>
                     {day && (
                       <>
-                        <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? 'var(--accent)' : 'var(--muted)', marginBottom: 4, width: 22, height: 22, borderRadius: '50%', background: isToday ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isToday ? '#000' : 'var(--muted)' }}>
+                        <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, marginBottom: 4, width: 22, height: 22, borderRadius: '50%', background: isToday ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isToday ? '#000' : 'var(--muted)' }}>
                           {day}
                         </div>
                         {dayPosts.map(p => (
