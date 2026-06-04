@@ -174,7 +174,19 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
   const [regenerating, setRegenerating] = useState(false)
   const [regenErr, setRegenErr] = useState('')
   const [showDatePicker, setShowDatePicker] = useState(false)
+  const [editTags, setEditTags] = useState<string[]>(post.hashtags || [])
+  const [newTag, setNewTag] = useState('')
   const imgReplaceRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { setEditTags(post.hashtags || []) }, [post.id])
+
+  const addTag = () => {
+    const t = newTag.trim().replace(/^#/, '')
+    if (!t || editTags.includes(t)) return
+    setEditTags(prev => [...prev, t])
+    setNewTag('')
+  }
+  const removeTag = (t: string) => setEditTags(prev => prev.filter(x => x !== t))
 
   const loadComments = async () => {
     const { data } = await supabase.from('comments').select('*').eq('post_id', post.id).order('created_at', { ascending: true })
@@ -325,11 +337,39 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
       {editing && (
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
           <div style={{ marginBottom: 10 }}><label style={s.label}>📸 Instagram</label><textarea value={igE} onChange={e => setIgE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
-          <div style={{ marginBottom: 12 }}><label style={s.label}>📘 Facebook</label><textarea value={fbE} onChange={e => setFbE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
+          <div style={{ marginBottom: 14 }}><label style={s.label}>📘 Facebook</label><textarea value={fbE} onChange={e => setFbE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
+
+          {/* Hashtag editor */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={s.label}># Hashtags bearbeiten ({editTags.length})</label>
+            {/* Current tags – click to remove */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              {editTags.map((t, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}>
+                  #{t.replace(/^#/, '')}
+                  <button onClick={() => removeTag(t)} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0, opacity: 0.7 }}>×</button>
+                </span>
+              ))}
+              {editTags.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Keine Hashtags – füge unten welche hinzu</div>}
+            </div>
+            {/* Add new tag */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={newTag}
+                onChange={e => setNewTag(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                placeholder="Neuen Hashtag eingeben (ohne #) + Enter"
+                style={{ ...s.input, flex: 1, fontSize: 13 }}
+              />
+              <button onClick={addTag} style={{ ...s.btnPrimary, ...s.btnSm, flexShrink: 0 }}>＋</button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>Auf × klicken um einen Hashtag zu entfernen</div>
+          </div>
+
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={() => { onUpdate({ ig_edit: igE, fb_edit: fbE }); setEditing(false) }} style={{ ...s.btnPrimary, ...s.btnSm }}>Speichern</button>
-            <button onClick={() => setEditing(false)} style={{ ...s.btnGhost, ...s.btnSm }}>Abbrechen</button>
-            <button onClick={() => navigator.clipboard.writeText(`INSTAGRAM:\n${igE}\n\nFACEBOOK:\n${fbE}\n\nHASHTAGS:\n${post.hashtags?.map(t => '#' + t.replace(/^#/, '')).join(' ')}`)}
+            <button onClick={() => { onUpdate({ ig_edit: igE, fb_edit: fbE, hashtags: editTags }); setEditing(false) }} style={{ ...s.btnPrimary, ...s.btnSm }}>Speichern</button>
+            <button onClick={() => { setEditing(false); setEditTags(post.hashtags || []) }} style={{ ...s.btnGhost, ...s.btnSm }}>Abbrechen</button>
+            <button onClick={() => navigator.clipboard.writeText(`INSTAGRAM:\n${igE}\n\nFACEBOOK:\n${fbE}\n\nHASHTAGS:\n${editTags.map(t => '#' + t.replace(/^#/, '')).join(' ')}`)}
               style={{ flex: 1, padding: '7px 10px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
               📋 Alles kopieren
             </button>
