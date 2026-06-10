@@ -39,14 +39,35 @@ export default function KundePage() {
   return (
     <div style={{ minHeight: '100vh', background: '#0D0F12', fontFamily: 'Bricolage Grotesque, sans-serif', color: 'var(--text)' }}>
       <div style={{ padding: '20px 20px 16px', textAlign: 'center', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>content<span style={{ color: 'var(--accent)' }}>.</span>studio</div>
+        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Meyer Consulting<br/><span style={{ color: 'var(--accent)', fontSize: 12 }}>Content Studio</span></div>
         <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>Hallo, {customer?.name}! 👋</div>
         <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: pendingCount > 0 ? 12 : 0 }}>Deine Social-Media-Beiträge zur Abnahme</div>
         {pendingCount > 0 && <div style={{ display: 'inline-block', background: 'var(--yellow)', color: '#000', borderRadius: 20, padding: '4px 14px', fontSize: 12, fontWeight: 700 }}>{pendingCount} Beitrag{pendingCount > 1 ? 'e' : ''} warten auf deine Freigabe</div>}
       </div>
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '20px 16px 60px' }}>
         {posts.length === 0 && <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}><div style={{ fontSize: 48, marginBottom: 12 }}>📭</div><div style={{ fontWeight: 700, marginBottom: 6 }}>Noch keine Beiträge</div><div style={{ fontSize: 13 }}>Sobald Beiträge bereit sind, erscheinen sie hier.</div></div>}
-        {posts.map(post => <KundePostCard key={post.id} post={post} customerName={customer?.name || ''} onUpdate={patch => updatePost(post.id, patch)} />)}
+
+        {/* Pending / open posts */}
+        {posts.filter(p => p.status === 'kunde' || p.status === 'rejected').length > 0 && (
+          <>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--yellow)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ background: 'var(--yellow)', color: '#000', borderRadius: 20, padding: '2px 10px', fontSize: 11 }}>⏳ Warten auf deine Freigabe</span>
+              <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{posts.filter(p => p.status === 'kunde' || p.status === 'rejected').length} Beitrag{posts.filter(p => p.status === 'kunde' || p.status === 'rejected').length > 1 ? 'e' : ''}</span>
+            </div>
+            {posts.filter(p => p.status === 'kunde' || p.status === 'rejected').map(post => <KundePostCard key={post.id} post={post} customerName={customer?.name || ''} onUpdate={patch => updatePost(post.id, patch)} />)}
+          </>
+        )}
+
+        {/* Approved posts */}
+        {posts.filter(p => p.status === 'approved').length > 0 && (
+          <>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', margin: '24px 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ background: 'var(--accent)', color: '#000', borderRadius: 20, padding: '2px 10px', fontSize: 11 }}>✓ Freigegeben</span>
+              <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{posts.filter(p => p.status === 'approved').length} Beitrag{posts.filter(p => p.status === 'approved').length > 1 ? 'e' : ''}</span>
+            </div>
+            {posts.filter(p => p.status === 'approved').map(post => <KundePostCard key={post.id} post={post} customerName={customer?.name || ''} onUpdate={patch => updatePost(post.id, patch)} />)}
+          </>
+        )}
       </div>
     </div>
   )
