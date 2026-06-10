@@ -20,7 +20,7 @@ export default function KundePage() {
     setCustomer(cust)
     const { data: ps } = await supabase.from('posts').select('*')
       .eq('customer_id', cust.id)
-      .in('status', ['kunde', 'approved', 'rejected'])
+      .in('status', ['kunde', 'approved', 'rejected', 'scheduled'])
       .order('publish_date', { ascending: true, nullsFirst: false })
     setPosts(ps || [])
     setLoading(false)
@@ -66,6 +66,17 @@ export default function KundePage() {
               <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{posts.filter(p => p.status === 'approved').length} Beitrag{posts.filter(p => p.status === 'approved').length > 1 ? 'e' : ''}</span>
             </div>
             {posts.filter(p => p.status === 'approved').map(post => <KundePostCard key={post.id} post={post} customerName={customer?.name || ''} onUpdate={patch => updatePost(post.id, patch)} />)}
+          </>
+        )}
+
+        {/* Scheduled posts */}
+        {posts.filter(p => p.status === 'scheduled').length > 0 && (
+          <>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#4FA3FF', margin: '24px 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ background: '#4FA3FF', color: '#000', borderRadius: 20, padding: '2px 10px', fontSize: 11 }}>📆 Eingeplant</span>
+              <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{posts.filter(p => p.status === 'scheduled').length} Beitrag{posts.filter(p => p.status === 'scheduled').length > 1 ? 'e' : ''}</span>
+            </div>
+            {posts.filter(p => p.status === 'scheduled').map(post => <KundePostCard key={post.id} post={post} customerName={customer?.name || ''} onUpdate={patch => updatePost(post.id, patch)} />)}
           </>
         )}
       </div>
