@@ -579,6 +579,10 @@ export default function AdminPage() {
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [publishDate, setPublishDate] = useState('')
   const [customPrompt, setCustomPrompt] = useState('')
+  const [isCarousel, setIsCarousel] = useState(false)
+  const [carouselImgs, setCarouselImgs] = useState<{ url: string, b64: string }[]>([])
+  const [croppingIdx, setCroppingIdx] = useState<number | null>(null)
+  const [carouselRaws, setCarouselRaws] = useState<string[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
   const blankC = { name: '', instagram: '', facebook: '', industry: '', tone: '', description: '', refs: [], lang: 'de', slug: '' }
   const [cForm, setCForm] = useState<any>(blankC)
@@ -643,24 +647,32 @@ export default function AdminPage() {
   }, [])
 
   const generate = async () => {
-    if (!selCust || !croppedB64) return
+    if (!selCust) return
+    if (isCarousel && carouselImgs.length === 0) return
+    if (!isCarousel && !croppedB64) return
     setGenerating(true); setResult(null); setErrMsg(''); setSelectedTags([])
     try {
-      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust, customPrompt }) })
+      const imageBase64 = isCarousel ? carouselImgs[0].b64 : croppedB64
+      const extraPrompt = isCarousel
+        ? `Dies ist ein Karussell-Beitrag mit ${carouselImgs.length} Bildern. Erstelle einen Text der für alle Bilder zusammen passt und zum Durchswipen einlädt. ${customPrompt}`
+        : customPrompt
+      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64, customer: selCust, customPrompt: extraPrompt }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
-      // Auto-select first 15
       setSelectedTags((data.tags || []).slice(0, 15))
     } catch (e: any) { setErrMsg(e.message) }
     setGenerating(false)
   }
 
   const regenerateFromTab = async () => {
-    if (!selCust || !croppedB64) return
+    if (!selCust) return
     setGenerating(true); setErrMsg(''); setSelectedTags([])
     try {
-      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: croppedB64, customer: selCust, customPrompt }) })
+      const imageBase64 = isCarousel ? carouselImgs[0]?.b64 : croppedB64
+      if (!imageBase64) return
+      const extraPrompt = isCarousel ? `Karussell mit ${carouselImgs.length} Bildern. ${customPrompt}` : customPrompt
+      const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64, customer: selCust, customPrompt: extraPrompt }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fehler')
       setResult(data)
@@ -671,9 +683,14 @@ export default function AdminPage() {
 
   const savePost = async (toKunde = false) => {
     if (!result || !selCust) return
+    const imageUrl = isCarousel ? carouselImgs[0]?.url : croppedImg
+    const allImages = isCarousel ? carouselImgs.map(i => i.url) : (croppedImg ? [croppedImg] : [])
     const { data } = await supabase.from('posts').insert({
       customer_id: selCust.id, customer_name: selCust.name,
-      image_url: croppedImg, ig_text: result.ig, fb_text: result.fb,
+      image_url: imageUrl,
+      image_urls: allImages,
+      is_carousel: isCarousel,
+      ig_text: result.ig, fb_text: result.fb,
       ig_edit: result.ig, fb_edit: result.fb,
       hashtags: selectedTags.length > 0 ? selectedTags : result.tags,
       status: toKunde ? 'kunde' : 'pending',
@@ -681,11 +698,11 @@ export default function AdminPage() {
     }).select().single()
     if (data) setPosts(p => [...p, data].sort((a, b) => {
       if (!a.publish_date && !b.publish_date) return 0
-      if (!a.publish_date) return 1
-      if (!b.publish_date) return -1
+      if (!a.publish_date) return 1; if (!b.publish_date) return -1
       return new Date(a.publish_date).getTime() - new Date(b.publish_date).getTime()
     }))
-    setResult(null); setCroppedImg(null); setCroppedB64(null); setRawImg(null); setSelectedTags([]); setPublishDate('')
+    setResult(null); setCroppedImg(null); setCroppedB64(null); setRawImg(null)
+    setSelectedTags([]); setPublishDate(''); setCarouselImgs([]); setCarouselRaws([])
     setNav(toKunde ? 'abnahme' : 'board')
   }
 
@@ -719,7 +736,8 @@ export default function AdminPage() {
     { id: 'generate', icon: '✦', label: 'Erstellen' },
     { id: 'board', icon: '☰', label: 'Board', badge: pendingCount || null },
     { id: 'abnahme', icon: '📤', label: 'Abnahme', badge: kundeCount || null },
-    { id: 'kalender', icon: '📅', label: 'Kalender', badge: approvedCount || null },
+    { id: 'freigegeben', icon: '✓', label: 'Freigegeben', badge: approvedCount || null },
+    { id: 'kalender', icon: '📅', label: 'Kalender' },
     { id: 'log', icon: '◷', label: 'Log' },
     { id: 'customers', icon: '◈', label: 'Kunden' },
   ]
@@ -753,7 +771,7 @@ export default function AdminPage() {
       </div>
       <style>{`@keyframes slideIn { from { transform: translateX(20px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }`}</style>
       <div style={s.sidebar}>
-        <div style={{ padding: '0 20px 24px', fontSize: 19, fontWeight: 800 }}>content<span style={{ color: 'var(--accent)' }}>.</span>studio</div>
+        <div style={{ padding: '0 20px 24px', fontSize: 13, fontWeight: 800, lineHeight: 1.3 }}>Meyer Consulting<br/><span style={{ color: 'var(--accent)' }}>Content Studio</span></div>
         {navItems.map(n => <NavItem key={n.id} icon={n.icon} label={n.label} active={nav === n.id} badge={n.badge} onClick={() => setNav(n.id)} />)}
         <div style={{ marginTop: 'auto', padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, textAlign: 'center', borderRadius: 8, fontSize: 11, padding: '7px 12px' }}>👁 Kundenansicht: {selCust.name}</a>}
@@ -781,53 +799,159 @@ export default function AdminPage() {
 
             {selCust && <div style={s.g2}>
               <div>
-                <div style={s.label}>② Bild hochladen &amp; zuschneiden</div>
-                {!showCrop && !croppedImg && (
-                  <div style={s.dropZone} onClick={() => fileRef.current?.click()}
-                    onDragOver={e => { e.preventDefault() }} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }}>
-                    <div style={{ fontSize: 36, marginBottom: 10 }}>📷</div>
-                    <div style={{ fontWeight: 700, marginBottom: 3 }}>Bild ablegen</div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>JPG · PNG · WEBP</div>
-                  </div>
-                )}
-                {showCrop && rawImg && (
-                  <div style={{ ...s.card, padding: 14 }}>
-                    <Cropper src={rawImg} onCrop={(url, b64) => { setCroppedImg(url); setCroppedB64(b64); setShowCrop(false) }} onCancel={() => { setShowCrop(false); setRawImg(null) }} />
-                  </div>
-                )}
-                {croppedImg && !showCrop && (
-                  <div>
-                    <img src={croppedImg} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} alt="" />
-                    <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                      <button onClick={generate} disabled={generating} style={{ ...s.btnPrimary, flex: 1 }}>{generating ? '⏳ Generiere...' : '✦ Beitrag generieren'}</button>
-                      <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg(''); setSelectedTags([]); setCustomPrompt('') }} style={s.btnGhost}>✕</button>
-                    </div>
-                  </div>
-                )}
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files![0])} />
+                {/* Mode toggle */}
+                <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 14 }}>
+                  <button onClick={() => { setIsCarousel(false); setCarouselImgs([]); setCarouselRaws([]); setCroppedImg(null); setCroppedB64(null); setResult(null) }}
+                    style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: 'none', background: !isCarousel ? 'var(--accent)' : 'transparent', color: !isCarousel ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>📷 Einzelbild</button>
+                  <button onClick={() => { setIsCarousel(true); setCroppedImg(null); setCroppedB64(null); setResult(null) }}
+                    style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: 'none', background: isCarousel ? 'var(--accent)' : 'transparent', color: isCarousel ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>🎠 Karussell</button>
+                </div>
 
-                {/* Custom prompt field */}
-                {croppedImg && (
+                <div style={s.label}>② Bild{isCarousel ? 'er' : ''} hochladen &amp; zuschneiden</div>
+
+                {/* SINGLE IMAGE */}
+                {!isCarousel && <>
+                  {!showCrop && !croppedImg && (
+                    <div style={s.dropZone} onClick={() => fileRef.current?.click()}
+                      onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }}>
+                      <div style={{ fontSize: 36, marginBottom: 10 }}>📷</div>
+                      <div style={{ fontWeight: 700, marginBottom: 3 }}>Bild ablegen</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>JPG · PNG · WEBP</div>
+                    </div>
+                  )}
+                  {showCrop && rawImg && (
+                    <div style={{ ...s.card, padding: 14 }}>
+                      <Cropper src={rawImg} onCrop={(url, b64) => { setCroppedImg(url); setCroppedB64(b64); setShowCrop(false) }} onCancel={() => { setShowCrop(false); setRawImg(null) }} />
+                    </div>
+                  )}
+                  {croppedImg && !showCrop && (
+                    <div>
+                      <img src={croppedImg} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 10, border: '1px solid var(--border)', display: 'block' }} alt="" />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                        <button onClick={generate} disabled={generating} style={{ ...s.btnPrimary, flex: 1 }}>{generating ? '⏳ Generiere...' : '✦ Beitrag generieren'}</button>
+                        <button onClick={() => { setCroppedImg(null); setCroppedB64(null); setResult(null); setRawImg(null); setErrMsg(''); setSelectedTags([]); setCustomPrompt('') }} style={s.btnGhost}>✕</button>
+                      </div>
+                    </div>
+                  )}
+                  <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files![0])} />
+                </>}
+
+                {/* CAROUSEL */}
+                {isCarousel && <>
+                  {croppingIdx !== null && croppingIdx < carouselRaws.length ? (
+                    <div style={{ ...s.card, padding: 14 }}>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Bild {croppingIdx + 1} von {carouselRaws.length} zuschneiden</div>
+                      <Cropper
+                        src={carouselRaws[croppingIdx]}
+                        onCrop={(url, b64) => {
+                          const updated = [...carouselImgs]
+                          updated[croppingIdx] = { url, b64 }
+                          setCarouselImgs(updated)
+                          // Move to next uncropped
+                          const nextIdx = carouselRaws.findIndex((_, i) => i > croppingIdx && !updated[i])
+                          setCroppingIdx(nextIdx >= 0 ? nextIdx : null)
+                        }}
+                        onCancel={() => setCroppingIdx(null)}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Image grid */}
+                      {carouselImgs.length > 0 && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 10 }}>
+                          {carouselImgs.map((img, i) => img && (
+                            <div key={i} style={{ position: 'relative' }}>
+                              <img src={img.url} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', borderRadius: 8, display: 'block' }} alt="" />
+                              <div style={{ position: 'absolute', top: 4, left: 6, background: 'rgba(0,0,0,.7)', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 4, padding: '2px 6px' }}>{i + 1}</div>
+                              <button onClick={() => { setCarouselImgs(imgs => imgs.filter((_, j) => j !== i)); setCarouselRaws(raws => raws.filter((_, j) => j !== i)) }}
+                                style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,.7)', border: 'none', color: '#fff', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                            </div>
+                          ))}
+                          {carouselImgs.length < 10 && (
+                            <div style={{ ...s.dropZone, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', aspectRatio: '4/5', fontSize: 28, cursor: 'pointer' }}
+                              onClick={() => fileRef.current?.click()}>＋</div>
+                          )}
+                        </div>
+                      )}
+                      {carouselImgs.length === 0 && (
+                        <div style={s.dropZone} onClick={() => fileRef.current?.click()}
+                          onDragOver={e => e.preventDefault()}
+                          onDrop={e => {
+                            e.preventDefault()
+                            const files = Array.from(e.dataTransfer.files).slice(0, 10)
+                            const raws: string[] = []
+                            files.forEach((file, i) => {
+                              const r = new FileReader()
+                              r.onload = ev => {
+                                raws.push(ev.target?.result as string)
+                                if (raws.length === files.length) {
+                                  setCarouselRaws(raws)
+                                  setCarouselImgs(raws.map(() => ({ url: '', b64: '' })))
+                                  setCroppingIdx(0)
+                                }
+                              }
+                              r.readAsDataURL(file)
+                            })
+                          }}>
+                          <div style={{ fontSize: 36, marginBottom: 10 }}>🎠</div>
+                          <div style={{ fontWeight: 700, marginBottom: 3 }}>Bilder ablegen oder klicken</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>Mehrere Bilder auf einmal · Max. 10</div>
+                        </div>
+                      )}
+                      <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+                        onChange={e => {
+                          const files = Array.from(e.target.files || []).slice(0, 10)
+                          if (files.length === 0) return
+                          const newRaws: string[] = []
+                          files.forEach(file => {
+                            const r = new FileReader()
+                            r.onload = ev => {
+                              newRaws.push(ev.target?.result as string)
+                              if (newRaws.length === files.length) {
+                                const startIdx = carouselRaws.length
+                                setCarouselRaws(prev => [...prev, ...newRaws])
+                                setCarouselImgs(prev => [...prev, ...newRaws.map(() => ({ url: '', b64: '' }))])
+                                setCroppingIdx(startIdx)
+                              }
+                            }
+                            r.readAsDataURL(file)
+                          })
+                        }}
+                      />
+                      {carouselImgs.length > 0 && carouselImgs.every(i => i.url) && (
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                          <button onClick={generate} disabled={generating} style={{ ...s.btnPrimary, flex: 1 }}>
+                            {generating ? '⏳ Generiere...' : `✦ Text für ${carouselImgs.length} Bilder generieren`}
+                          </button>
+                          <button onClick={() => { setCarouselImgs([]); setCarouselRaws([]); setResult(null) }} style={s.btnGhost}>✕</button>
+                        </div>
+                      )}
+                      {carouselImgs.some(i => !i.url) && carouselImgs.length > 0 && (
+                        <button onClick={() => setCroppingIdx(carouselImgs.findIndex(i => !i.url))}
+                          style={{ ...s.btnYellow, width: '100%', justifyContent: 'center', marginTop: 8, padding: 10 }}>
+                          ✂️ Noch {carouselImgs.filter(i => !i.url).length} Bild(er) zuschneiden
+                        </button>
+                      )}
+                    </>
+                  )}
+                </>}
+
+                {/* Custom prompt */}
+                {(croppedImg || carouselImgs.some(i => i.url)) && (
                   <div style={{ marginTop: 14, ...s.card }}>
                     <div style={s.label}>✍️ Zusätzliche Anweisungen (optional)</div>
-                    <textarea
-                      value={customPrompt}
-                      onChange={e => setCustomPrompt(e.target.value)}
-                      placeholder={`z.B. "Erwähne das neue Mittagsmenü", "Mehr Emojis", "Kürzer und knackiger", "Schreibe auf Englisch"...`}
-                      rows={3}
-                      style={{ ...s.input, resize: 'vertical', minHeight: 72, lineHeight: 1.5, fontSize: 13 }}
-                    />
-                    {customPrompt && (
-                      <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        ✓ Wird beim nächsten Generieren berücksichtigt
-                        <button onClick={() => setCustomPrompt('')} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕ Löschen</button>
-                      </div>
-                    )}
+                    <textarea value={customPrompt} onChange={e => setCustomPrompt(e.target.value)}
+                      placeholder={`z.B. "Erwähne das neue Angebot", "Mehr Emojis", "Kürzer und knackiger"...`}
+                      rows={3} style={{ ...s.input, resize: 'vertical', minHeight: 72, lineHeight: 1.5, fontSize: 13 }} />
+                    {customPrompt && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      ✓ Wird berücksichtigt
+                      <button onClick={() => setCustomPrompt('')} style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕ Löschen</button>
+                    </div>}
                   </div>
                 )}
 
                 {/* Publish date picker */}
-                {croppedImg && (
+                {(croppedImg || carouselImgs.some(i => i.url)) && (
                   <div style={{ marginTop: 14, ...s.card }}>
                     <div style={s.label}>📅 Veröffentlichungsdatum (optional)</div>
                     <input type="date" value={publishDate} onChange={e => setPublishDate(e.target.value)}
@@ -898,19 +1022,45 @@ export default function AdminPage() {
           </div>
         </>}
 
-        {/* ABNAHME */}
+        {/* ABNAHME – nur beim Kunden offene + abgelehnte Beiträge */}
         {nav === 'abnahme' && <>
           <div style={s.topbar}>
-            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Sortiert nach Veröffentlichungsdatum</div></div>
+            <div><div style={{ fontSize: 18, fontWeight: 800 }}>Abnahme Kunde</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Beiträge die auf Kundenfreigabe warten</div></div>
             {selCust && <a href={`/kunde/${selCust.slug}`} target="_blank" style={{ ...s.btnYellow, borderRadius: 8, padding: '8px 14px', fontSize: 12 }}>👁 Kundenansicht</a>}
           </div>
           <div style={s.body}>
             <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
+              <button onClick={() => setSelCust(null)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: !selCust ? 'var(--accent)' : 'transparent', color: !selCust ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Alle</button>
               {customers.map(c => <button key={c.id} onClick={() => setSelCust(c)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: selCust?.id === c.id ? 'var(--accent)' : 'transparent', color: selCust?.id === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{c.name}</button>)}
             </div>
-            {sortedPosts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).length === 0
-              ? <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>Keine Beiträge beim Kunden</div>
-              : sortedPosts.filter(p => ['kunde', 'approved', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)
+            {sortedPosts.filter(p => ['kunde', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).length === 0
+              ? <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
+                  <div style={{ fontWeight: 700 }}>Keine offenen Beiträge</div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>Freigegebene Beiträge findest du unter „✓ Freigegeben"</div>
+                </div>
+              : sortedPosts.filter(p => ['kunde', 'rejected'].includes(p.status) && (!selCust || p.customer_id === selCust.id)).map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)
+            }
+          </div>
+        </>}
+
+        {/* FREIGEGEBEN – separate Ansicht nur für freigegebene Beiträge */}
+        {nav === 'freigegeben' && <>
+          <div style={s.topbar}>
+            <div><div style={{ fontSize: 18, fontWeight: 800 }}>✓ Freigegeben</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Vom Kunden freigegebene Beiträge – bereit zur Einplanung</div></div>
+          </div>
+          <div style={s.body}>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
+              <button onClick={() => setCustFilter(null)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: !custFilter ? 'var(--accent)' : 'transparent', color: !custFilter ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Alle Kunden</button>
+              {customers.map(c => <button key={c.id} onClick={() => setCustFilter(c.id)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: custFilter === c.id ? 'var(--accent)' : 'transparent', color: custFilter === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{c.name}</button>)}
+            </div>
+            {sortedPosts.filter(p => p.status === 'approved' && (!custFilter || p.customer_id === custFilter)).length === 0
+              ? <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>⏳</div>
+                  <div style={{ fontWeight: 700 }}>Noch keine freigegebenen Beiträge</div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>Sobald ein Kunde freigibt erscheinen sie hier</div>
+                </div>
+              : sortedPosts.filter(p => p.status === 'approved' && (!custFilter || p.customer_id === custFilter)).map(p => <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />)
             }
           </div>
         </>}
