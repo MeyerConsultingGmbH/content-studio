@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'content.studio',
-  description: 'Social Media Content Tool',
+  title: 'Meyer Consulting Content Studio',
+  description: 'Social Media Content Tool by Meyer Consulting',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
