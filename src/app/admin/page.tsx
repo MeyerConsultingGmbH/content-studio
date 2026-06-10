@@ -35,9 +35,9 @@ function NavItem({ icon, label, active, badge, onClick }: any) {
 function Badge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
     pending: ['#6B778520', '#6B7785'], review: ['#FF900020', '#FF9000'],
-    kunde: ['#FFD44720', '#FFD447'], approved: ['#3BFFA020', '#3BFFA0'], rejected: ['#FF575720', '#FF5757'],
+    kunde: ['#FFD44720', '#FFD447'], approved: ['#3BFFA020', '#3BFFA0'], rejected: ['#FF575720', '#FF5757'], scheduled: ['#4FA3FF20', '#4FA3FF'],
   }
-  const labels: Record<string, string> = { pending: '⏳ Entwurf', review: '👁 Prüfung', kunde: '📤 Beim Kunden', approved: '✓ Freigegeben', rejected: '✕ Abgelehnt' }
+  const labels: Record<string, string> = { pending: '⏳ Entwurf', review: '👁 Prüfung', kunde: '📤 Beim Kunden', approved: '✓ Freigegeben', rejected: '✕ Abgelehnt', scheduled: '📆 Eingeplant' }
   const [bg, color] = map[status] || map.pending
   return <span style={{ background: bg, color, border: `1px solid ${color}40`, borderRadius: 20, padding: '3px 9px', fontSize: 11, fontWeight: 700 }}>{labels[status] || status}</span>
 }
@@ -224,6 +224,7 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
 
   const statusButtons = [
     { s: 'approved', label: '✓ Freigeben', bg: '#3BFFA020', color: '#3BFFA0', border: '#3BFFA040' },
+    { s: 'scheduled', label: '📆 Einplanen', bg: '#4FA3FF20', color: '#4FA3FF', border: '#4FA3FF40' },
     { s: 'kunde', label: '📤 Zum Kunden', bg: '#FFD44720', color: '#FFD447', border: '#FFD44740' },
     { s: 'review', label: '👁 Prüfung', bg: '#FF900015', color: '#FF9000', border: '#FF900040' },
     { s: 'rejected', label: '✕ Ablehnen', bg: '#FF575715', color: '#FF5757', border: '#FF575730' },
@@ -731,12 +732,14 @@ export default function AdminPage() {
 
   const pendingCount = posts.filter(p => p.status === 'pending' || p.status === 'review').length
   const kundeCount = posts.filter(p => p.status === 'kunde').length
-  const approvedCount = posts.filter(p => p.status === 'approved' && (p as any).publish_date).length
+  const approvedCount = posts.filter(p => p.status === 'approved').length
+  const scheduledCount = posts.filter(p => p.status === 'scheduled').length
   const navItems = [
     { id: 'generate', icon: '✦', label: 'Erstellen' },
     { id: 'board', icon: '☰', label: 'Board', badge: pendingCount || null },
     { id: 'abnahme', icon: '📤', label: 'Abnahme', badge: kundeCount || null },
     { id: 'freigegeben', icon: '✓', label: 'Freigegeben', badge: approvedCount || null },
+    { id: 'eingeplant', icon: '📆', label: 'Eingeplant', badge: scheduledCount || null },
     { id: 'kalender', icon: '📅', label: 'Kalender' },
     { id: 'log', icon: '◷', label: 'Log' },
     { id: 'customers', icon: '◈', label: 'Kunden' },
@@ -1067,6 +1070,34 @@ export default function AdminPage() {
 
         {/* KALENDER */}
         {nav === 'kalender' && <KalenderView posts={sortedPosts} customers={customers} onUpdate={updatePost} />}
+
+        {/* EINGEPLANT */}
+        {nav === 'eingeplant' && <>
+          <div style={s.topbar}>
+            <div><div style={{ fontSize: 18, fontWeight: 800 }}>📆 Eingeplant</div><div style={{ fontSize: 11, color: 'var(--muted)' }}>Bereits eingeplante Beiträge – für dich und den Kunden sichtbar</div></div>
+          </div>
+          <div style={s.body}>
+            <div style={{ ...s.card, borderColor: '#4FA3FF40', background: '#4FA3FF08', marginBottom: 16 }}>
+              <div style={{ fontSize: 12, color: '#4FA3FF', lineHeight: 1.6 }}>
+                📆 Beiträge die du auf <strong>„Einplanen"</strong> gesetzt hast erscheinen hier. Sie sind auch in der Kundenansicht unter „Eingeplant" sichtbar – aber getrennt von den offenen Beiträgen.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--surface)', padding: 4, borderRadius: 10, marginBottom: 16, overflowX: 'auto' }}>
+              <button onClick={() => setCustFilter(null)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: !custFilter ? 'var(--accent)' : 'transparent', color: !custFilter ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Alle</button>
+              {customers.map(c => <button key={c.id} onClick={() => setCustFilter(c.id)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: custFilter === c.id ? 'var(--accent)' : 'transparent', color: custFilter === c.id ? '#000' : 'var(--muted)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{c.name}</button>)}
+            </div>
+            {sortedPosts.filter(p => p.status === 'scheduled' && (!custFilter || p.customer_id === custFilter)).length === 0
+              ? <div style={{ ...s.card, textAlign: 'center', padding: '50px 20px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: 32, marginBottom: 10 }}>📆</div>
+                  <div style={{ fontWeight: 700 }}>Noch nichts eingeplant</div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>Klicke bei einem freigegebenen Beitrag auf „📆 Einplanen"</div>
+                </div>
+              : sortedPosts.filter(p => p.status === 'scheduled' && (!custFilter || p.customer_id === custFilter)).map(p =>
+                  <PostCard key={p.id} post={p} customers={customers} onUpdate={patch => updatePost(p.id, patch)} onDelete={() => deletePost(p.id)} />
+                )
+            }
+          </div>
+        </>}
 
         {/* LOG */}
         {nav === 'log' && <>
