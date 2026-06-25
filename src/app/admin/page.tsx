@@ -337,13 +337,16 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
       {/* Edit panel */}
       {editing && (
         <div style={{ borderTop: '1px solid var(--border)', padding: 14, background: '#0A0D10' }}>
+
+          {/* KI-Korrektur */}
+          <KiKorrektur post={post} igE={igE} fbE={fbE} onResult={(ig, fb) => { setIgE(ig); setFbE(fb) }} customers={customers} />
+
           <div style={{ marginBottom: 10 }}><label style={s.label}>📸 Instagram</label><textarea value={igE} onChange={e => setIgE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
           <div style={{ marginBottom: 14 }}><label style={s.label}>📘 Facebook</label><textarea value={fbE} onChange={e => setFbE(e.target.value)} rows={4} style={{ ...s.input, resize: 'vertical', minHeight: 80, lineHeight: 1.6 }} /></div>
 
           {/* Hashtag editor */}
           <div style={{ marginBottom: 14 }}>
             <label style={s.label}># Hashtags bearbeiten ({editTags.length})</label>
-            {/* Current tags – click to remove */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
               {editTags.map((t, i) => (
                 <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)', borderRadius: 20, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}>
@@ -351,20 +354,15 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
                   <button onClick={() => removeTag(t)} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0, opacity: 0.7 }}>×</button>
                 </span>
               ))}
-              {editTags.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Keine Hashtags – füge unten welche hinzu</div>}
+              {editTags.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)' }}>Keine Hashtags</div>}
             </div>
-            {/* Add new tag */}
             <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={newTag}
-                onChange={e => setNewTag(e.target.value)}
+              <input value={newTag} onChange={e => setNewTag(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                placeholder="Neuen Hashtag eingeben (ohne #) + Enter"
-                style={{ ...s.input, flex: 1, fontSize: 13 }}
-              />
+                placeholder="Neuen Hashtag (ohne #) + Enter"
+                style={{ ...s.input, flex: 1, fontSize: 13 }} />
               <button onClick={addTag} style={{ ...s.btnPrimary, ...s.btnSm, flexShrink: 0 }}>＋</button>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>Auf × klicken um einen Hashtag zu entfernen</div>
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -381,6 +379,56 @@ function PostCard({ post, customers, onUpdate, onDelete }: { post: Post, custome
   )
 }
 
+// ── KI Korrektur ───────────────────────────────────────────────────────────────
+function KiKorrektur({ post, igE, fbE, onResult, customers }: { post: Post, igE: string, fbE: string, onResult: (ig: string, fb: string) => void, customers: Customer[] }) {
+  const [korrektur, setKorrektur] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  const apply = async () => {
+    if (!korrektur.trim()) return
+    setLoading(true); setErr('')
+    const cust = customers.find(c => c.id === post.customer_id)
+    try {
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: null,
+          customer: cust,
+          customPrompt: `Hier sind die aktuellen Texte:\n\nINSTAGRAM:\n${igE}\n\nFACEBOOK:\n${fbE}\n\nBitte passe die Texte basierend auf diesen Korrekturwünschen an:\n${korrektur}\n\nBehalte Stil und Struktur bei, ändere nur was gewünscht wird.`,
+          textOnly: true
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      onResult(data.ig, data.fb)
+      setKorrektur('')
+    } catch (e: any) { setErr(e.message) }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{ marginBottom: 16, padding: 12, background: '#0D1520', border: '1px solid #A78BFA40', borderRadius: 10 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#A78BFA', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>
+        ✨ KI-Korrektur – Kundenwünsche umsetzen
+      </div>
+      <textarea
+        value={korrektur}
+        onChange={e => setKorrektur(e.target.value)}
+        placeholder={`z.B. "Mach den Text kürzer", "Erwähne unsere neue Öffnungszeit", "Weniger Emojis", "Formuliere professioneller"...`}
+        rows={3}
+        style={{ width: '100%', background: '#0A0D14', border: '1px solid #A78BFA40', color: '#E8ECF0', borderRadius: 8, padding: '9px 12px', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', outline: 'none', lineHeight: 1.5, marginBottom: 8 }}
+      />
+      {err && <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 6 }}>⚠️ {err}</div>}
+      <button onClick={apply} disabled={loading || !korrektur.trim()}
+        style={{ background: loading ? 'transparent' : '#A78BFA', color: loading ? '#A78BFA' : '#000', border: '1px solid #A78BFA', borderRadius: 7, padding: '7px 16px', fontWeight: 700, fontSize: 12, cursor: loading || !korrektur.trim() ? 'not-allowed' : 'pointer', opacity: !korrektur.trim() ? 0.5 : 1, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6 }}>
+        {loading ? <><span style={{ width: 14, height: 14, border: '2px solid #A78BFA', borderTopColor: 'transparent', borderRadius: '50%', animation: 'rot .7s linear infinite', display: 'inline-block' }} />Korrigiere...</> : '✨ Text anpassen lassen'}
+      </button>
+    </div>
+  )
+}
+
 // ── Kalender View ──────────────────────────────────────────────────────────────
 function KalenderView({ posts, customers, onUpdate }: { posts: Post[], customers: Customer[], onUpdate: (id: string, patch: Partial<Post>) => void }) {
   const today = new Date()
@@ -390,7 +438,7 @@ function KalenderView({ posts, customers, onUpdate }: { posts: Post[], customers
   const [calCustFilter, setCalCustFilter] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const approvedPosts = posts.filter(p => p.status === 'approved' && (p as any).publish_date && (!calCustFilter || p.customer_id === calCustFilter))
+  const approvedPosts = posts.filter(p => (p.status === 'approved' || p.status === 'scheduled') && (p as any).publish_date && (!calCustFilter || p.customer_id === calCustFilter))
 
   // Build calendar days
   const firstDay = new Date(viewYear, viewMonth, 1)
@@ -554,6 +602,17 @@ function KalenderView({ posts, customers, onUpdate }: { posts: Post[], customers
                   style={{ width: '100%', background: '#1877F2', color: '#fff', border: 'none', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                   📘 In Meta Business Suite einplanen
                 </a>
+                {selectedPost.status !== 'scheduled' && (
+                  <button onClick={() => { onUpdate(selectedPost.id, { status: 'scheduled' }); setSelectedPost({ ...selectedPost, status: 'scheduled' }) }}
+                    style={{ width: '100%', background: '#4FA3FF20', color: '#4FA3FF', border: '1px solid #4FA3FF40', borderRadius: 8, padding: 11, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                    📆 Als eingeplant markieren
+                  </button>
+                )}
+                {selectedPost.status === 'scheduled' && (
+                  <div style={{ textAlign: 'center', padding: '10px', background: '#4FA3FF15', border: '1px solid #4FA3FF40', borderRadius: 8, color: '#4FA3FF', fontWeight: 700, fontSize: 13 }}>
+                    📆 Bereits eingeplant
+                  </div>
+                )}
               </div>
             </div>
           </div>
